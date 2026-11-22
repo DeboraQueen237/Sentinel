@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+// Canal Agent  ->  Sentinel.Server (gRPC sur HTTP/2, mTLS par défaut – doc §4, §11)
+option csharp_namespace = "Sentinel.Shared.Grpc";
+
+package sentinel.v1;
+
+service AgentGateway {
+  // Enregistrement / ré-enregistrement de l'agent au démarrage. Renvoie la configuration courante.
+  rpc Register (AgentHello) returns (AgentRegistration);
+  // Envoi d'un lot d'événements normalisés (file locale = outbox côté agent, rejouée si le cœur est indisponible).
+  rpc SubmitEvents (EventBatch) returns (SubmitAck);
+  // Battement de cœur périodique (15 s) : métriques agent ; renvoie la config si elle a changé.
+  rpc Heartbeat (HeartbeatRequest) returns (HeartbeatReply);
+  // Flux serveur -> agent des commandes de réponse (blocage, quarantaine, annulation…).
+  rpc SubscribeCommands (CommandSubscription) returns (stream AgentCommand);
+  // Compte-rendu d'exécution d'une commande (contient l'état initial pour la réversibilité).
+  rpc ReportActionResult (ActionResultReport) returns (Ack);
+}
+
+message AgentHello {
+  string host_id = 1;
+  string machine_name = 2;
+  string os_version = 3;
+  string agent_version = 4;
+  repeated string users = 5;
+  // SHA-256 du binaire de l'agent (contrôle d'intégrité côté serveur)
+  string binary_sha256 = 6;
+}
+
+message AgentRegistration {
+  bool accepted = 1;
+  string message = 2;
+  // SentinelSettings sérialisé en JSON (Sentinel.Shared.Json.SentinelJson.Options)
+  string settings_json = 3;
+  int64 settings_version = 4;
+}
+
+message ProtoEvent {
+  string id = 1;
+  // Horodatage Unix en millisecondes (UTC)
+  int64 timestamp_unix_ms = 2;
+  string host_id = 3;
+  string user_id = 4;
+  // Valeur entière de Sentinel.Shared.Models.EventCategory
+  int32 category = 5;
+  string event_type = 6;
+  string subject = 7;
+  map<string, string> attributes = 8;
+  string correlation_hints = 9;
+}
+
+message EventBatch {
+  string host_id = 1;
+  repeated ProtoEvent events = 2;
+  int64 batch_sequence = 3;
+}
+
+message SubmitAck {
+  int32 accepted = 1;
+  int32 rejected = 2;
+  string message = 3;
+}
+
+message CollectorStatus {
+  string name = 1;
+  bool running = 2;
+  string error = 3;
+  int64 events_produced = 4;
+}
+
+message HeartbeatRequest {
+  string host_id = 1;
+  double cpu_percent = 2;
+  int64 working_set_bytes = 3;
+  int32 queue_length = 4;
+  int64 events_collected = 5;
+  repeated CollectorStatus collectors = 6;
+  int64 settings_version = 7;
+}
+
+message HeartbeatReply {
+  bool ok = 1;
+  // Non vide uniquement si la configuration a changé depuis settings_version
+  string settings_json = 2;
+  int64 settings_version = 3;
+}
+
+message CommandSubscription {
+  string host_id = 1;
+}
+
+message AgentCommand {
+  // = identifiant du ticket d'action (ActionTicket.Id)
+  string command_id = 1;
+  // Valeur entière de Sentinel.Shared.Models.ResponseActionType
+  int32 action_type = 2;
+  string target = 3;
+  map<string, string> parameters = 4;
+  // true = annuler une action précédente à partir de revert_state_json
+  bool revert = 5;
+  string revert_state_json = 6;
+  // true = mode simulation : ne rien exécuter, seulement valider/journaliser
+  bool simulate = 7;
+}
+
+message ActionResultReport {
+  string command_id = 1;
+  string host_id = 2;
+  bool success = 3;
+  string message = 4;
+  // État initial nécessaire à l'annulation (règle pare-feu créée, chemin d'origine du fichier, id périphérique…)
+  string revert_state_json = 5;
+  bool was_revert = 6;
+}
+
+message Ack {
+  bool ok = 1;
+  string message = 2;
+}

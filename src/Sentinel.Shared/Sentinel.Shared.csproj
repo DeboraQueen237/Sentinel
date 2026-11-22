@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Sentinel.Shared</RootNamespace>
+    <Description>Modèles, énumérations, contrats gRPC/REST/IPC et utilitaires de sécurité partagés.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Core.Api" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="All" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="Protos\sentinel.proto" GrpcServices="Both" />
+  </ItemGroup>
+
+</Project>
