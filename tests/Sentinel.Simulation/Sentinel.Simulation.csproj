@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Sentinel.Simulation</RootNamespace>
+    <Description>Scénarios d'attaque simulés et mesure du Time-To-Detect (configurations A/B/C, doc §14).</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Sentinel.Shared\Sentinel.Shared.csproj" />
+    <ProjectReference Include="..\..\src\Sentinel.AI\Sentinel.AI.csproj" />
+    <ProjectReference Include="..\..\src\Sentinel.Core\Sentinel.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Grpc.Net.Client" />
+  </ItemGroup>
+</Project>

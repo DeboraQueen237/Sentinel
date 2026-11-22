@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <RootNamespace>Sentinel.Installer</RootNamespace>
+    <Description>Installeur : écran de consentement explicite, déploiement des binaires, services Windows, certificats mTLS, extension navigateur.</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Sentinel.Shared\Sentinel.Shared.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(BundlePayloadZip)' != '' and Exists('$(BundlePayloadZip)')">
+    <EmbeddedResource Include="$(BundlePayloadZip)" LogicalName="Sentinel.Installer.payload.zip" />
+  </ItemGroup>
+</Project>
