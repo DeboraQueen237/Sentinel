@@ -1,2 +1,29 @@
 <Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="README.md" />
+    <File Path="LICENSE" />
+    <File Path="SENTINEL_Documentation.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Sentinel.Shared/Sentinel.Shared.csproj" />
+    <Project Path="src/Sentinel.AI/Sentinel.AI.csproj" />
+    <Project Path="src/Sentinel.Core/Sentinel.Core.csproj" />
+    <Project Path="src/Sentinel.Storage/Sentinel.Storage.csproj" />
+    <Project Path="src/Sentinel.Server/Sentinel.Server.csproj" />
+    <Project Path="src/Sentinel.Agent/Sentinel.Agent.csproj" />
+    <Project Path="src/Sentinel.Tray/Sentinel.Tray.csproj" />
+    <Project Path="src/Sentinel.BrowserHost/Sentinel.BrowserHost.csproj" />
+    <Project Path="src/Sentinel.Watchdog/Sentinel.Watchdog.csproj" />
+    <Project Path="src/Sentinel.Admin/Sentinel.Admin.csproj" />
+    <Project Path="src/Sentinel.Installer/Sentinel.Installer.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Sentinel.Core.Tests/Sentinel.Core.Tests.csproj" />
+    <Project Path="tests/Sentinel.Agent.Tests/Sentinel.Agent.Tests.csproj" />
+    <Project Path="tests/Sentinel.Server.Tests/Sentinel.Server.Tests.csproj" />
+    <Project Path="tests/Sentinel.Simulation/Sentinel.Simulation.csproj" />
+  </Folder>
 </Solution>

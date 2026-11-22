@@ -480,3 +480,17 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# SENTINEL runtime data, databases, certificates & secrets (§15.3)
+.sentinel-dev-data/
+*.db
+*.db-wal
+*.db-shm
+*.pfx
+*.cer
+*.key
+*.pem
+*.dpapi
+*.jsonl
+TestResults/
+dist/
