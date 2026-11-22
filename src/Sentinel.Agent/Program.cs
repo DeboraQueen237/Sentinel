@@ -6,6 +6,8 @@ using Sentinel.Agent.Response;
 using Sentinel.Agent.Security;
 using Sentinel.Agent.Storage;
 using Sentinel.Agent.Transport;
+using Sentinel.Detection.Static;
+using Sentinel.ML;
 using Sentinel.Shared.Infrastructure;
 using Serilog;
 
@@ -42,19 +44,40 @@ try
         return new SqliteEventOutbox(SentinelPaths.AgentOutboxDatabase, Math.Max(1000, opts.MaxOutboxEvents));
     });
 
-    // Pipeline d'événements
+    // Pipeline d'événements & dédoublonnage multi-sources
+    builder.Services.AddSingleton<EventDeduplicator>();
     builder.Services.AddSingleton<AgentEventPipeline>();
     builder.Services.AddSingleton<IEventSink>(sp => sp.GetRequiredService<AgentEventPipeline>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentEventPipeline>());
 
-    // Collecteurs
+    // Analyse statique PE + YARA + ML.NET (M3 & M5)
+    builder.Services.AddSingleton<IYaraScanner, YaraScannerService>();
+    builder.Services.AddSingleton<PeStaticAnalyzer>();
+    builder.Services.AddSingleton<IStaticFileScanner>(sp => new StaticFileScanner(
+        sp.GetRequiredService<IYaraScanner>(),
+        sp.GetRequiredService<PeStaticAnalyzer>(),
+        sp.GetRequiredService<AgentStateStore>().CurrentSettings.StaticScan,
+        sp.GetService<ILogger<StaticFileScanner>>()));
+    builder.Services.AddSingleton<IPeMlClassifier>(sp => new PeMlClassifierService(
+        modelPath: SentinelPaths.MlModelFile,
+        metadataPath: SentinelPaths.MlModelMetadataFile,
+        settings: sp.GetRequiredService<AgentStateStore>().CurrentSettings.MachineLearning,
+        logger: sp.GetService<ILogger<PeMlClassifierService>>()));
+
+    // Collecteurs (v1 + v2 Defender, Sysmon optionnel, Canaris anti-ransomware, Visibilité scripts, Analyse statique)
     builder.Services.AddSingleton<ProcessEnricher>();
+    builder.Services.AddSingleton<CanaryManager>();
     builder.Services.AddSingleton<IEventCollector, ProcessCollector>();
     builder.Services.AddSingleton<IEventCollector, NetworkCollector>();
     builder.Services.AddSingleton<IEventCollector, FileSystemCollector>();
     builder.Services.AddSingleton<IEventCollector, SessionCollector>();
     builder.Services.AddSingleton<IEventCollector, DeviceCollector>();
     builder.Services.AddSingleton<IEventCollector, InstallationCollector>();
+    builder.Services.AddSingleton<IEventCollector, DefenderCollector>();
+    builder.Services.AddSingleton<IEventCollector, SysmonCollector>();
+    builder.Services.AddSingleton<IEventCollector, CanaryCollector>();
+    builder.Services.AddSingleton<IEventCollector, ScriptVisibilityCollector>();
+    builder.Services.AddSingleton<IEventCollector, StaticScanCollector>();
 
     builder.Services.AddSingleton<CollectorHostService>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<CollectorHostService>());
