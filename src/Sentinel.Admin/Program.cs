@@ -64,6 +64,7 @@ try
     builder.Services.AddScoped<LiveHubClient>();
     builder.Services.AddScoped<ToastService>();
     builder.Services.AddScoped<ThemeService>();
+    builder.Services.AddScoped<LocalizationService>();
 
     var app = builder.Build();
 

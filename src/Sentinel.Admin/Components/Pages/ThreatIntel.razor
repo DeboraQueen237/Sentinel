@@ -1,0 +1,198 @@
+@page "/intel"
+@inject SentinelApiClient Api
+@inject LocalizationService L
+@inject ToastService Toasts
+@implements IDisposable
+
+<PageTitle>@L.T("Renseignement menaces", "Threat Intelligence") — SENTINEL</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">@L.T("Renseignement sur les menaces", "Threat Intelligence")</h1>
+        <p class="page-subtitle">@L.T("Flux locaux indexés (SQLite + filtre de Bloom, fonctionnement 100 % hors ligne)", "Indexed local feeds (SQLite + Bloom filter, 100% offline-capable)")</p>
+    </div>
+    <div class="page-actions">
+        <button type="button" class="btn btn-primary" @onclick="RefreshFeedsAsync" disabled="@_refreshing">
+            @(_refreshing ? L.T("Mise à jour…", "Updating…") : L.T("Mettre à jour les flux", "Refresh Feeds"))
+        </button>
+    </div>
+</div>
+
+<ErrorBanner Message="@_error" OnRetry="LoadAsync" />
+
+@if (_status is not null)
+{
+    <div class="kpi-grid" style="margin-bottom:18px;">
+        <div class="kpi-card" style="--kpi-accent:var(--accent-cyan);">
+            <div class="kpi-label"><span>@L.T("Indicateurs totaux", "Total Indicators")</span></div>
+            <div class="kpi-value mono">@_status.TotalIndicators.ToString("N0")</div>
+            <div class="kpi-meta">@(_status.OfflineMode ? L.T("Cache hors ligne actif", "Offline cache active") : L.T("Synchronisé", "Synchronized"))</div>
+        </div>
+        <div class="kpi-card" style="--kpi-accent:var(--accent-violet);">
+            <div class="kpi-label"><span>Hashes SHA-256</span></div>
+            <div class="kpi-value mono">@_status.HashCount.ToString("N0")</div>
+            <div class="kpi-meta">MalwareBazaar / ThreatFox</div>
+        </div>
+        <div class="kpi-card" style="--kpi-accent:var(--accent-amber);">
+            <div class="kpi-label"><span>@L.T("Domaines & URLs", "Domains & URLs")</span></div>
+            <div class="kpi-value mono">@((_status.DomainCount + _status.UrlCount).ToString("N0"))</div>
+            <div class="kpi-meta">URLhaus / ThreatFox</div>
+        </div>
+        <div class="kpi-card" style="--kpi-accent:var(--accent-crimson);">
+            <div class="kpi-label"><span>@L.T("Adresses IP C2", "C2 IP Addresses")</span></div>
+            <div class="kpi-value mono">@_status.IpCount.ToString("N0")</div>
+            <div class="kpi-meta">Feodo Tracker / ThreatFox</div>
+        </div>
+    </div>
+
+    <div class="card" style="margin-bottom:18px;">
+        <div class="card-header">
+            <div>
+                <h2 class="card-title">@L.T("Recherche rapide d'indicateur (Bloom + SQLite)", "Fast Indicator Lookup (Bloom + SQLite)")</h2>
+                <p class="card-subtitle">@L.T("Vérifiez un hash SHA-256, domaine, URL ou adresse IP en quelques millisecondes", "Verify a SHA-256 hash, domain, URL, or IP address in milliseconds")</p>
+            </div>
+        </div>
+        <div class="filter-bar" style="margin-bottom:0;">
+            <div class="field" style="max-width:160px;">
+                <label class="field-label" for="ioc-type">@L.T("Type", "Type")</label>
+                <select id="ioc-type" name="ioc-type" class="select" @bind="_lookupType">
+                    <option value="hash">SHA-256</option>
+                    <option value="domain">@L.T("Domaine", "Domain")</option>
+                    <option value="url">URL</option>
+                    <option value="ip">IP</option>
+                </select>
+            </div>
+            <div class="field" style="flex:1;">
+                <label class="field-label" for="ioc-value">@L.T("Indicateur", "Indicator")</label>
+                <input id="ioc-value" name="ioc-value" class="input mono" @bind="_lookupValue" placeholder="ex. evil.example.xyz ou 275a021b..." />
+            </div>
+            <div class="field" style="flex:0 0 auto;min-width:auto;align-self:flex-end;">
+                <button type="button" class="btn btn-primary" @onclick="RunLookupAsync" disabled="@string.IsNullOrWhiteSpace(_lookupValue)">
+                    @L.T("Rechercher", "Lookup")
+                </button>
+            </div>
+        </div>
+
+        @if (_lookupResult is not null)
+        {
+            <div class="card-elevated" style="margin-top:14px;">
+                <div class="row-wrap" style="justify-content:space-between;margin-bottom:6px;">
+                    <span class="badge @(_lookupResult.Found ? "sev-critical" : "act-reverted")">
+                        @(_lookupResult.Found ? L.T("INDICATEUR MALVEILLANT CONNU", "KNOWN MALICIOUS INDICATOR") : L.T("Non listé dans la base locale", "Not listed locally"))
+                    </span>
+                    <span class="mono text-muted" style="font-size:12px;">@_lookupResult.ElapsedMs.ToString("0.00") ms</span>
+                </div>
+                <div style="font-size:13.5px;">@_lookupResult.Justification</div>
+                @if (_lookupResult.Found)
+                {
+                    <div class="row-wrap text-muted" style="gap:16px;font-size:12px;margin-top:8px;">
+                        <span>@L.T("Source", "Source") : <strong class="mono">@_lookupResult.Source</strong></span>
+                        <span>@L.T("Score suggéré", "Suggested Score") : <strong class="mono text-crimson">@_lookupResult.SuggestedScore/100</strong></span>
+                        @if (_lookupResult.FirstSeen.HasValue)
+                        {
+                            <span>@L.T("Vu le", "First Seen") : <span class="mono">@_lookupResult.FirstSeen.Value.ToString("yyyy-MM-dd")</span></span>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <div>
+                <h2 class="card-title">@L.T("État des flux configurés", "Configured Feeds Status")</h2>
+                <p class="card-subtitle">
+                    @L.T("Dernière mise à jour", "Last update") :
+                    <span class="mono">@(_status.LastRefresh.HasValue ? UiFormatters.FormatDateTime(_status.LastRefresh.Value) : L.T("Jamais", "Never"))</span>
+                </p>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="soc-table">
+                <thead>
+                    <tr>
+                        <th>@L.T("Flux", "Feed")</th>
+                        <th>@L.T("Licence", "License")</th>
+                        <th>@L.T("Statut", "Status")</th>
+                        <th>@L.T("Indicateurs", "Indicators")</th>
+                        <th>@L.T("Dernière synchro", "Last Sync")</th>
+                        <th>@L.T("Observation", "Notes")</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var f in _status.Feeds)
+                    {
+                        <tr>
+                            <td><strong>@f.Name</strong></td>
+                            <td><span class="badge status-fp">@f.License</span></td>
+                            <td>
+                                @if (!f.Enabled)
+                                {
+                                    <span class="badge status-fp">@L.T("Désactivé (opt-in)", "Disabled (opt-in)")</span>
+                                }
+                                else if (f.Online)
+                                {
+                                    <span class="badge act-reverted">@L.T("Actif", "Active")</span>
+                                }
+                                else
+                                {
+                                    <span class="badge sev-moderate">@L.T("Cache hors ligne", "Offline cache")</span>
+                                }
+                            </td>
+                            <td class="mono">@f.IndicatorCount.ToString("N0")</td>
+                            <td class="mono" style="font-size:12px;">@(f.LastUpdated.HasValue ? UiFormatters.FormatShortDateTime(f.LastUpdated.Value) : "—")</td>
+                            <td class="text-secondary" style="font-size:12px;">@(f.LastError ?? "Nominal")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private ThreatIntelStatusDto? _status;
+    private ThreatIntelLookupDto? _lookupResult;
+    private string _lookupType = "domain";
+    private string _lookupValue = string.Empty;
+    private bool _refreshing;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        L.LanguageChanged += OnLangChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        try { _status = await Api.GetThreatIntelStatusAsync(); }
+        catch (SentinelApiException ex) { _error = ex.Message; }
+    }
+
+    private async Task RefreshFeedsAsync()
+    {
+        _refreshing = true;
+        try
+        {
+            _status = await Api.RefreshThreatIntelAsync();
+            Toasts.Success(L.T("Flux actualisés", "Feeds updated"), $"{_status.TotalIndicators} indicateurs en cache.");
+        }
+        catch (SentinelApiException ex) { Toasts.Danger("Erreur", ex.Message); }
+        finally { _refreshing = false; }
+    }
+
+    private async Task RunLookupAsync()
+    {
+        try
+        {
+            _lookupResult = await Api.LookupThreatIntelAsync(_lookupType, _lookupValue.Trim());
+        }
+        catch (SentinelApiException ex) { Toasts.Danger("Erreur", ex.Message); }
+    }
+
+    private void OnLangChanged(string lang) => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => L.LanguageChanged -= OnLangChanged;
+}

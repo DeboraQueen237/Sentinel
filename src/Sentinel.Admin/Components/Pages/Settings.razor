@@ -188,6 +188,72 @@ else if (_settings is not null)
                         <span class="switch-track"></span>
                     </label>
                 </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Collecteur Microsoft Defender (WMI + Journal)</div>
+                        <div class="field-hint">Détections antivirus et alertes d'affaiblissement Defender (M1)</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.EnableDefenderCollector" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Collecteur Sysmon optionnel</div>
+                        <div class="field-hint">Lit Microsoft-Windows-Sysmon/Operational uniquement si Sysmon est installé (non embarqué)</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.EnableSysmonCollector" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Fichiers canari anti-ransomware (M6)</div>
+                        <div class="field-hint">Déploie des fichiers leurres suivis par empreinte SHA-256</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.Canaries.Enabled" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Visibilité scripts PowerShell 4104 / ETW AMSI (M7)</div>
+                        <div class="field-hint">Inspecte en mémoire (métadonnées + hash par défaut, sans fournisseur AMSI managé)</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.ScriptVisibility.Enabled" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Conserver un extrait nettoyé de script suspect (≤ 300 car.)</div>
+                        <div class="field-hint">Désactivé par défaut pour confidentialité maximale ; secrets automatiquement caviardés</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.ScriptVisibility.StoreSanitizedExcerpt" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Moteurs Sigma / YARA / ML PE (M2, M3, M5)</div>
+                        <div class="field-hint">Évaluation locale multi-moteurs avec rechargement à chaud</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.Rules.EnableSigma" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
             </div>
 
             <StringListEditor Label="Dossiers surveillés (FileSystemWatcher)"
@@ -246,7 +312,7 @@ else if (_settings is not null)
                 <div class="field">
                     <label class="field-label">Modèle de scoring</label>
                     <input class="input mono" @bind="_settings.Llm.Model" @bind:after="MarkDirty" />
-                    <span class="field-hint">Recommandé : qwen2.5:7b ou qwen2.5:3b</span>
+                    <span class="field-hint">Recommandé : qwen2.5-coder:3b (local) ou qwen2.5:7b</span>
                 </div>
                 <div class="field">
                     <label class="field-label">Modèle d'embeddings</label>
