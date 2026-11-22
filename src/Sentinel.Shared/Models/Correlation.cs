@@ -6,7 +6,11 @@ public sealed record CorrelationLink(
     Guid ToEventId,
     GraphEdgeType Type,
     double Weight,
-    string Key);
+    string Key)
+{
+    /// <summary>Horodatage de l'observation du lien pour la décroissance temporelle v2.</summary>
+    public DateTimeOffset? ObservedAt { get; init; }
+}
 
 /// <summary>Correspondance avec une chaîne d'attaque modélisée (doc §8.3).</summary>
 public sealed record AttackChainMatch(
@@ -46,6 +50,14 @@ public sealed record CorrelationCluster
     public int MaxEventScore { get; init; }
     public string Justification { get; init; } = string.Empty;
     public IReadOnlyList<string> MitreTechniques { get; init; } = Array.Empty<string>();
+    /// <summary>Tactiques MITRE ATT&amp;CK dérivées des techniques (ex. Execution, Impact).</summary>
+    public IReadOnlyList<string> MitreTactics { get; init; } = Array.Empty<string>();
+    /// <summary>Récit chronologique généré automatiquement pour le cluster.</summary>
+    public string Narrative { get; init; } = string.Empty;
+    /// <summary>Probabilité de chaîne estimée par le modèle markovien (0..1).</summary>
+    public double ChainProbability { get; init; }
+    /// <summary>Contributions agrégées par moteur sur le cluster.</summary>
+    public IReadOnlyList<ScoreContribution> ScoreContributions { get; init; } = Array.Empty<ScoreContribution>();
 }
 
 /// <summary>Action planifiée par le moteur de décision (doc §9.2).</summary>
@@ -89,10 +101,15 @@ public sealed record PipelineResult
     public bool LlmUsed { get; init; }
 }
 
-/// <summary>Retour administrateur réinjecté dans le moteur (doc §9.4).</summary>
+/// <summary>Retour administrateur réinjecté dans le moteur (doc §9.4, réversible et historisé en v2).</summary>
 public sealed record AnalystFeedback(
     Guid? AlertId,
     Guid? ClusterId,
     IReadOnlyList<Guid> EventIds,
     bool IsFalsePositive,
-    string? Comment);
+    string? Comment)
+{
+    public Guid FeedbackId { get; init; } = Guid.NewGuid();
+    public DateTimeOffset RecordedAt { get; init; } = DateTimeOffset.UtcNow;
+    public bool Reverted { get; init; }
+}

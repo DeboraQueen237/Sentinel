@@ -42,6 +42,14 @@ public sealed record SecurityEvent(
             attributes ?? new Dictionary<string, string>(), correlationHints);
 }
 
+/// <summary>Contribution d'un moteur de détection au score final (explicabilité v2).</summary>
+public sealed record ScoreContribution(
+    string Engine,
+    int Score,
+    double Weight,
+    string Summary,
+    IReadOnlyList<string>? Signals = null);
+
 /// <summary>Résultat de scoring d'un événement (doc §5.2, exigence F3).</summary>
 public sealed record ThreatAssessment(
     Guid EventId,
@@ -56,6 +64,9 @@ public sealed record ThreatAssessment(
 
     /// <summary>Techniques MITRE ATT&amp;CK associées (ex. "T1566").</summary>
     public IReadOnlyList<string> MitreTechniques { get; init; } = Array.Empty<string>();
+
+    /// <summary>Détail des contributions par moteur (Règles, Sigma, YARA, ThreatIntel, ML, LLM).</summary>
+    public IReadOnlyList<ScoreContribution> ScoreContributions { get; init; } = Array.Empty<ScoreContribution>();
 
     [JsonIgnore]
     public ThreatLevel Level => ThreatLevels.FromScore(Score);

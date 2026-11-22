@@ -5,11 +5,19 @@
     <File Path="Directory.Packages.props" />
     <File Path="README.md" />
     <File Path="LICENSE" />
+    <File Path="CHANGELOG.md" />
+    <File Path="SECURITY.md" />
+    <File Path="THIRD_PARTY_NOTICES.md" />
     <File Path="SENTINEL_Documentation.md" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Sentinel.Shared/Sentinel.Shared.csproj" />
     <Project Path="src/Sentinel.AI/Sentinel.AI.csproj" />
+    <Project Path="src/Sentinel.Detection.Sigma/Sentinel.Detection.Sigma.csproj" />
+    <Project Path="src/Sentinel.Detection.Static/Sentinel.Detection.Static.csproj" />
+    <Project Path="src/Sentinel.ThreatIntel/Sentinel.ThreatIntel.csproj" />
+    <Project Path="src/Sentinel.ML/Sentinel.ML.csproj" />
+    <Project Path="src/Sentinel.ML.Trainer/Sentinel.ML.Trainer.csproj" />
     <Project Path="src/Sentinel.Core/Sentinel.Core.csproj" />
     <Project Path="src/Sentinel.Storage/Sentinel.Storage.csproj" />
     <Project Path="src/Sentinel.Server/Sentinel.Server.csproj" />
@@ -24,6 +32,7 @@
     <Project Path="tests/Sentinel.Core.Tests/Sentinel.Core.Tests.csproj" />
     <Project Path="tests/Sentinel.Agent.Tests/Sentinel.Agent.Tests.csproj" />
     <Project Path="tests/Sentinel.Server.Tests/Sentinel.Server.Tests.csproj" />
+    <Project Path="tests/Sentinel.Detection.Tests/Sentinel.Detection.Tests.csproj" />
     <Project Path="tests/Sentinel.Simulation/Sentinel.Simulation.csproj" />
   </Folder>
 </Solution>
