@@ -1,0 +1,23 @@
+# License: MIT — Original rule authored for SENTINEL v2
+title: Suspicious Double File Extension Masquerading
+id: 6a100007-5e77-4b21-9c07-000000000007
+status: stable
+description: Detects creation or execution of files disguising an executable or script behind a benign document extension (for example invoice.pdf.exe or report.docx.js).
+author: Sentinel Project Contributors
+license: MIT
+date: 2026-01-15
+logsource:
+    product: windows
+detection:
+    selection_target:
+        TargetFilename|re: '\.(?:pdf|docx?|xlsx?|pptx?|txt|rtf|jpg|jpeg|png|csv|zip)\.(?:exe|scr|com|pif|bat|cmd|vbs|vbe|js|jse|hta|ps1|msi|lnk)$'
+    selection_image:
+        Image|re: '\.(?:pdf|docx?|xlsx?|pptx?|txt|rtf|jpg|jpeg|png|csv|zip)\.(?:exe|scr|com|pif|bat|cmd|vbs|vbe|js|jse|hta|ps1|msi|lnk)$'
+    condition: selection_target or selection_image
+falsepositives:
+    - Unlikely in legitimate environments; occasionally seen with poorly named archive tools
+level: high
+tags:
+    - attack.defense_evasion
+    - attack.t1036
+    - attack.t1036.007
