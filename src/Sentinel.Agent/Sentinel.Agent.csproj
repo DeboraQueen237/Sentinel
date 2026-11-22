@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>Sentinel.Agent</RootNamespace>
+    <Description>Service Windows de collecte (processus, réseau, fichiers, sessions, USB, installations) et d'exécution des actions de réponse.</Description>
+    <UserSecretsId>sentinel-agent</UserSecretsId>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Sentinel.Shared\Sentinel.Shared.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" />
+    <PackageReference Include="System.Management" />
+    <PackageReference Include="System.Diagnostics.EventLog" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="Serilog.Extensions.Hosting" />
+    <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sentinel.Agent.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SENTINEL — Statut</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="popup-body">
+  <header class="popup-header">
+    <div id="badge" class="shield-badge shield-idle">S</div>
+    <div>
+      <h1>SENTINEL</h1>
+      <span id="status-text" class="status-pill">Vérification…</span>
+    </div>
+  </header>
+
+  <section class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-label">Mode</span>
+      <strong id="mode-value">—</strong>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Domaines bloqués</span>
+      <strong id="blocked-count">0</strong>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Événements relayés</span>
+      <strong id="events-count">0</strong>
+    </div>
+  </section>
+
+  <section class="privacy-box">
+    <h2>Transparence &amp; vie privée</h2>
+    <ul>
+      <li>Transmet uniquement domaine, redirections et nom de téléchargement.</li>
+      <li>Aucune lecture du contenu des pages, formulaires ou mots de passe.</li>
+      <li>Les paramètres d'URL (<code>?…</code>) sont supprimés localement avant envoi.</li>
+      <li>Traitement 100 % local sur votre poste.</li>
+    </ul>
+  </section>
+
+  <footer class="popup-footer">
+    <span id="error-text" class="error-text"></span>
+    <button id="btn-reconnect" class="btn-secondary" type="button">Reconnecter</button>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

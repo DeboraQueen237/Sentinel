@@ -1,0 +1,9 @@
+{
+  "name": "com.sentinel.browserhost",
+  "description": "Hôte Native Messaging local reliant l'extension SENTINEL à Sentinel.Agent.",
+  "path": "C:\\Program Files\\Sentinel\\Sentinel.BrowserHost.exe",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://REPLACE_WITH_SENTINEL_EXTENSION_ID/"
+  ]
+}

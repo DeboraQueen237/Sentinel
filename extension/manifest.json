@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "SENTINEL — Protection Navigation",
+  "version": "1.0.0",
+  "description": "Transmet uniquement les métadonnées de navigation (domaine, redirections, téléchargements) à l'agent local SENTINEL et applique les blocages réversibles.",
+  "permissions": [
+    "tabs",
+    "webNavigation",
+    "downloads",
+    "nativeMessaging",
+    "declarativeNetRequest",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "SENTINEL — Protection Navigation",
+    "default_popup": "popup.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "blocked.html",
+        "blocked.js",
+        "styles.css"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}
