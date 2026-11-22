@@ -1,0 +1,189 @@
+@page "/rules"
+@inject SentinelApiClient Api
+@inject LocalizationService L
+@inject ToastService Toasts
+@implements IDisposable
+
+<PageTitle>@L.T("Règles Sigma & YARA", "Sigma & YARA Rules") — SENTINEL</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">@L.T("Règles de détection & Analyse statique", "Detection Rules & Static Analysis")</h1>
+        <p class="page-subtitle">@L.T("Gestion à chaud des règles Sigma/YARA (%ProgramData%\\Sentinel\\rules) et scan statique PE/YARA/ML à la demande", "Hot-reload Sigma/YARA rules and on-demand PE/YARA/ML static scanning")</p>
+    </div>
+    <div class="page-actions">
+        <button type="button" class="btn btn-primary" @onclick="ReloadRulesAsync" disabled="@_reloading">
+            @(_reloading ? L.T("Rechargement…", "Reloading…") : L.T("Recharger à chaud", "Hot Reload"))
+        </button>
+    </div>
+</div>
+
+<ErrorBanner Message="@_error" OnRetry="LoadAsync" />
+
+<div class="card" style="margin-bottom:18px;">
+    <div class="card-header">
+        <div>
+            <h2 class="card-title">@L.T("Scan statique à la demande (YARA + PE + ML.NET)", "On-Demand Static File Scan (YARA + PE + ML.NET)")</h2>
+            <p class="card-subtitle">@L.T("Analyse locale bornée en taille et durée — aucune donnée n'est envoyée sur Internet", "Locally bounded size/timeout analysis — zero cloud upload")</p>
+        </div>
+    </div>
+    <div class="filter-bar" style="margin-bottom:0;">
+        <div class="field" style="flex:1;">
+            <label class="field-label" for="scan-file-path">@L.T("Chemin du fichier local à analyser", "Local file path to scan")</label>
+            <input id="scan-file-path" name="scan-file-path" class="input mono" @bind="_scanPath" placeholder="C:\Windows\System32\notepad.exe" />
+        </div>
+        <div class="field" style="flex:0 0 auto;min-width:auto;align-self:flex-end;">
+            <button type="button" class="btn btn-primary" @onclick="RunScanAsync" disabled="@(_scanning || string.IsNullOrWhiteSpace(_scanPath))">
+                @(_scanning ? L.T("Analyse…", "Scanning…") : L.T("Analyser le fichier", "Scan File"))
+            </button>
+        </div>
+    </div>
+
+    @if (_scanResult is not null)
+    {
+        <div class="card-elevated" style="margin-top:14px;">
+            @if (!string.IsNullOrWhiteSpace(_scanResult.Error))
+            {
+                <div class="text-crimson">@_scanResult.Error</div>
+            }
+            else
+            {
+                <div class="row-wrap" style="justify-content:space-between;margin-bottom:8px;">
+                    <strong class="mono">@_scanResult.FilePath</strong>
+                    <span class="mono text-muted">@_scanResult.ElapsedMs.ToString("0.0") ms • @_scanResult.YaraEngine</span>
+                </div>
+                <ScoreBar Score="_scanResult.CombinedScore" />
+                <div class="grid-3" style="margin-top:12px;font-size:12.5px;">
+                    <div><span class="text-muted">SHA-256 :</span> <span class="mono" style="word-break:break-all;">@_scanResult.Sha256</span></div>
+                    <div><span class="text-muted">PE / Authenticode :</span> <strong class="mono">@(_scanResult.IsPe ? (_scanResult.Signed ? $"Signé ({_scanResult.Publisher})" : "PE non signé") : "Non-PE")</strong></div>
+                    <div><span class="text-muted">@L.T("Entropie max", "Max Entropy") :</span> <strong class="mono">@_scanResult.MaxEntropy.ToString("0.00")</strong> @(_scanResult.ProbablePacker is not null ? $"• Packer: {_scanResult.ProbablePacker}" : "")</div>
+                </div>
+                <div class="row-wrap" style="margin-top:10px;gap:12px;">
+                    <span><strong>YARA :</strong> @(_scanResult.YaraMatches.Count == 0 ? L.T("Aucune correspondance", "No match") : string.Join(", ", _scanResult.YaraMatches))</span>
+                    @if (_scanResult.MlMaliciousProbability.HasValue)
+                    {
+                        <span><strong>ML.NET :</strong> <span class="mono">@(_scanResult.MlMaliciousProbability.Value.ToString("P1"))</span> (@string.Join(", ", _scanResult.MlTopFeatures.Take(3)))</span>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div>
+            <h2 class="card-title">@L.T("Catalogue des règles chargées", "Loaded Rules Catalog") (@FilteredRules.Count)</h2>
+            <p class="card-subtitle">Sigma + YARA</p>
+        </div>
+        <div class="row-wrap" style="gap:8px;">
+            <select aria-label="Filtre moteur" class="select" style="width:auto;" @bind="_engineFilter">
+                <option value="">@L.T("Tous les moteurs", "All engines")</option>
+                <option value="Sigma">Sigma</option>
+                <option value="YARA">YARA</option>
+            </select>
+            <input aria-label="Recherche règle" class="input" style="width:220px;" @bind="_search" @bind:event="oninput" placeholder="@L.T("Rechercher…", "Search…")" />
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table class="soc-table">
+            <thead>
+                <tr>
+                    <th>@L.T("Moteur", "Engine")</th>
+                    <th>@L.T("Titre & Identifiant", "Title & ID")</th>
+                    <th>@L.T("Niveau", "Level")</th>
+                    <th>MITRE ATT&amp;CK</th>
+                    <th>@L.T("Détections", "Matches")</th>
+                    <th>@L.T("État", "State")</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in FilteredRules)
+                {
+                    <tr>
+                        <td><span class="badge @(r.Engine == "Sigma" ? "sev-low" : "sev-moderate")">@r.Engine</span></td>
+                        <td>
+                            <div style="font-weight:600;">@r.Title</div>
+                            <div class="mono text-muted" style="font-size:11px;">@r.Id • @r.SourceFile</div>
+                        </td>
+                        <td><span class="badge status-fp">@r.Level</span></td>
+                        <td><MitreChips Techniques="r.MitreTechniques" MaxVisible="3" /></td>
+                        <td class="mono">@r.MatchCount</td>
+                        <td>
+                            <button type="button" class="btn btn-sm @(r.Enabled ? "btn-emerald" : "")" @onclick="() => ToggleRuleAsync(r)">
+                                @(r.Enabled ? L.T("Active", "Enabled") : L.T("Désactivée", "Disabled"))
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    private List<RuleSummaryDto> _rules = new();
+    private string _engineFilter = string.Empty;
+    private string _search = string.Empty;
+    private string _scanPath = string.Empty;
+    private StaticScanResultDto? _scanResult;
+    private bool _reloading;
+    private bool _scanning;
+    private string? _error;
+
+    private List<RuleSummaryDto> FilteredRules => _rules
+        .Where(r => string.IsNullOrWhiteSpace(_engineFilter) || r.Engine.Equals(_engineFilter, StringComparison.OrdinalIgnoreCase))
+        .Where(r => string.IsNullOrWhiteSpace(_search) ||
+                    r.Title.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                    r.Id.Contains(_search, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        L.LanguageChanged += OnLangChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        try { _rules = (await Api.GetRulesAsync()).ToList(); }
+        catch (SentinelApiException ex) { _error = ex.Message; }
+    }
+
+    private async Task ReloadRulesAsync()
+    {
+        _reloading = true;
+        try
+        {
+            var res = await Api.ReloadRulesAsync();
+            await LoadAsync();
+            Toasts.Success(L.T("Règles rechargées", "Rules reloaded"), $"Sigma: {res.SigmaCount}, YARA: {res.YaraCount}");
+        }
+        catch (SentinelApiException ex) { Toasts.Danger("Erreur", ex.Message); }
+        finally { _reloading = false; }
+    }
+
+    private async Task ToggleRuleAsync(RuleSummaryDto rule)
+    {
+        try
+        {
+            var updated = await Api.ToggleRuleAsync(rule.Id, !rule.Enabled);
+            var idx = _rules.FindIndex(x => x.Id == rule.Id);
+            if (idx >= 0) _rules[idx] = updated;
+        }
+        catch (SentinelApiException ex) { Toasts.Danger("Erreur", ex.Message); }
+    }
+
+    private async Task RunScanAsync()
+    {
+        _scanning = true;
+        try { _scanResult = await Api.RunStaticScanAsync(_scanPath.Trim()); }
+        catch (SentinelApiException ex) { Toasts.Danger("Erreur", ex.Message); }
+        finally { _scanning = false; }
+    }
+
+    private void OnLangChanged(string lang) => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => L.LanguageChanged -= OnLangChanged;
+}

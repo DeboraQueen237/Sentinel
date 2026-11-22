@@ -1,0 +1,104 @@
+@page "/canaries"
+@inject SentinelApiClient Api
+@inject LocalizationService L
+@inject ToastService Toasts
+@implements IDisposable
+
+<PageTitle>@L.T("Fichiers canari", "Canary Files") — SENTINEL</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">@L.T("Fichiers canari anti-ransomware", "Anti-Ransomware Canary Files")</h1>
+        <p class="page-subtitle">@L.T("Fichiers leurres discrets surveillés par empreinte SHA-256 pour détection ultra-précoce de chiffrement", "Discreet decoy files monitored by SHA-256 hash for early ransomware detection")</p>
+    </div>
+    <div class="page-actions">
+        <button type="button" class="btn btn-primary" @onclick="RedeployAsync" disabled="@_busy">
+            @(_busy ? L.T("Déploiement…", "Deploying…") : L.T("Vérifier / Redéployer", "Verify / Redeploy"))
+        </button>
+    </div>
+</div>
+
+<ErrorBanner Message="@_error" OnRetry="LoadAsync" />
+
+<div class="card">
+    <div class="card-header">
+        <div>
+            <h2 class="card-title">@L.T("Inventaire des canaris actifs", "Active Canaries Inventory") (@_canaries.Count)</h2>
+            <p class="card-subtitle">@L.T("Toute altération, renommage ou suppression déclenche immédiatement une réponse critique réversible", "Any modification, rename, or deletion immediately triggers a critical reversible response")</p>
+        </div>
+    </div>
+
+    @if (_canaries.Count == 0)
+    {
+        <EmptyState Title="@L.T("Aucun canari enregistré", "No canary registered")"
+                    Subtitle="@L.T("Cliquez sur Vérifier / Redéployer pour déployer les fichiers leurres dans les dossiers configurés.", "Click Verify / Redeploy to deploy decoy files in configured folders.")" />
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="soc-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>@L.T("Fichier leurre", "Decoy File")</th>
+                        <th>@L.T("Taille", "Size")</th>
+                        <th>SHA-256</th>
+                        <th>@L.T("Intégrité", "Integrity")</th>
+                        <th>@L.T("Vérifié le", "Checked")</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var c in _canaries)
+                    {
+                        <tr>
+                            <td class="mono">@c.Id</td>
+                            <td class="mono" style="font-size:12px;word-break:break-all;">@c.FilePath</td>
+                            <td class="mono">@((c.SizeBytes / 1024.0).ToString("0.0")) Ko</td>
+                            <td class="mono text-muted" style="font-size:11px;">@(c.ExpectedSha256.Length > 16 ? c.ExpectedSha256[..16] + "…" : c.ExpectedSha256)</td>
+                            <td>
+                                <span class="badge @(c.Intact ? "act-reverted" : "sev-critical")">
+                                    @(c.Intact ? L.T("Intact", "Intact") : c.Status)
+                                </span>
+                            </td>
+                            <td class="mono" style="font-size:12px;">@(c.LastCheckedAt.HasValue ? UiFormatters.FormatShortDateTime(c.LastCheckedAt.Value) : "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private List<CanaryStatusDto> _canaries = new();
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        L.LanguageChanged += OnLangChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        try { _canaries = (await Api.GetCanariesAsync()).ToList(); }
+        catch (SentinelApiException ex) { _error = ex.Message; }
+    }
+
+    private async Task RedeployAsync()
+    {
+        _busy = true;
+        try
+        {
+            _canaries = (await Api.RedeployCanariesAsync()).ToList();
+            Toasts.Success(L.T("Canaris vérifiés", "Canaries verified"), $"{_canaries.Count} fichier(s) suivi(s).");
+        }
+        catch (SentinelApiException ex) { Toasts.Danger("Erreur", ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private void OnLangChanged(string lang) => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => L.LanguageChanged -= OnLangChanged;
+}

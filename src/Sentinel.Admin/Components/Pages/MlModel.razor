@@ -1,0 +1,91 @@
+@page "/ml"
+@inject SentinelApiClient Api
+@inject LocalizationService L
+@implements IDisposable
+
+<PageTitle>@L.T("Modèle ML PE", "ML PE Classifier") — SENTINEL</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">@L.T("Classifieur ML de fichiers PE (ML.NET)", "PE File ML Classifier (ML.NET)")</h1>
+        <p class="page-subtitle">@L.T("Caractéristiques inspirées d'EMBER — signal auxiliaire borné, jamais seul décisif", "EMBER-inspired features — bounded auxiliary signal, never solely decisive")</p>
+    </div>
+    <div class="page-actions">
+        <button type="button" class="btn btn-primary" @onclick="LoadAsync">@L.T("Actualiser", "Refresh")</button>
+    </div>
+</div>
+
+<ErrorBanner Message="@_error" OnRetry="LoadAsync" />
+
+@if (_ml is not null)
+{
+    <div class="kpi-grid" style="margin-bottom:18px;">
+        <div class="kpi-card" style="--kpi-accent:var(--accent-emerald);">
+            <div class="kpi-label"><span>@L.T("État du modèle", "Model Status")</span></div>
+            <div class="kpi-value" style="font-size:20px;">@(_ml.Loaded ? L.T("Chargé", "Loaded") : L.T("Non chargé", "Not loaded"))</div>
+            <div class="kpi-meta mono">v@_ml.Version • @_ml.Algorithm</div>
+        </div>
+        <div class="kpi-card" style="--kpi-accent:var(--accent-cyan);">
+            <div class="kpi-label"><span>ROC-AUC</span></div>
+            <div class="kpi-value mono">@_ml.Auc.ToString("0.000")</div>
+            <div class="kpi-meta">@L.T("Aire sous courbe ROC", "Area Under ROC Curve")</div>
+        </div>
+        <div class="kpi-card" style="--kpi-accent:var(--accent-violet);">
+            <div class="kpi-label"><span>@L.T("Rappel @ 0,1 % FPR", "Recall @ 0.1% FPR")</span></div>
+            <div class="kpi-value mono">@_ml.RecallAt01Fpr.ToString("P1")</div>
+            <div class="kpi-meta">@L.T("Exigence taux faux positifs bas", "Low false-positive target")</div>
+        </div>
+        <div class="kpi-card" style="--kpi-accent:var(--accent-amber);">
+            <div class="kpi-label"><span>@L.T("Score F1 / Variables", "F1 Score / Features")</span></div>
+            <div class="kpi-value mono">@_ml.F1Score.ToString("0.000")</div>
+            <div class="kpi-meta">@_ml.FeatureCount @L.T("caractéristiques PE", "PE features")</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <div>
+                <h2 class="card-title">@L.T("Gouvernance & Limites du modèle", "Model Governance & Limitations")</h2>
+                <p class="card-subtitle">@L.T("Documentation détaillée disponible dans docs/ml-evaluation.md", "Detailed evaluation available in docs/ml-evaluation.md")</p>
+            </div>
+        </div>
+        <div class="stack-sm">
+            <div class="card-elevated">
+                <div class="field-label">@L.T("Jeu d'entraînement & Licence", "Training Dataset & License")</div>
+                <div style="margin-top:4px;font-size:13px;">@_ml.DatasetNotice</div>
+            </div>
+            <div class="card-elevated">
+                <div class="field-label">@L.T("Emplacement du modèle versionné", "Versioned Model Path")</div>
+                <div class="mono" style="margin-top:4px;font-size:12.5px;word-break:break-all;">@_ml.ModelPath</div>
+            </div>
+            <div class="card-elevated">
+                <div class="field-label">@L.T("Garde-fou décisionnel", "Decision Guardrail")</div>
+                <div style="margin-top:4px;font-size:13px;">
+                    @L.T("Conformément à l'architecture défensive de SENTINEL v2, le classifieur ML n'apporte qu'une contribution plafonnée (max 35/100 par défaut) et ne déclenche jamais une action de blocage seul.",
+                        "Per SENTINEL v2 defensive architecture, the ML classifier only contributes a bounded auxiliary weight (max 35/100 by default) and never triggers automated containment alone.")
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private MlModelStatusDto? _ml;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        L.LanguageChanged += OnLangChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        try { _ml = await Api.GetMlStatusAsync(); }
+        catch (SentinelApiException ex) { _error = ex.Message; }
+    }
+
+    private void OnLangChanged(string lang) => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => L.LanguageChanged -= OnLangChanged;
+}

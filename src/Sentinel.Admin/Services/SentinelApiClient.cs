@@ -310,6 +310,52 @@ public sealed class SentinelApiClient
     public Task<SystemHealthDto> GetHealthAsync(CancellationToken ct = default) =>
         SendAsync<SystemHealthDto>(HttpMethod.Get, ApiRoutes.Health, null, true, ct);
 
+    public Task<IReadOnlyList<AgentHealthDto>> GetAgentsHealthAsync(CancellationToken ct = default) =>
+        SendAsync<IReadOnlyList<AgentHealthDto>>(HttpMethod.Get, ApiRoutes.AgentsHealth, null, true, ct);
+
+    // ------------------------------------------------------------------------- Détection v2 (Intel, Règles, Scan, ML, Canaris, Feedback)
+    public Task<ThreatIntelStatusDto> GetThreatIntelStatusAsync(CancellationToken ct = default) =>
+        SendAsync<ThreatIntelStatusDto>(HttpMethod.Get, ApiRoutes.ThreatIntelStatus, null, true, ct);
+
+    public Task<ThreatIntelLookupDto> LookupThreatIntelAsync(string type, string value, CancellationToken ct = default) =>
+        SendAsync<ThreatIntelLookupDto>(
+            HttpMethod.Get,
+            BuildUrl(ApiRoutes.ThreatIntelLookup, ("type", type), ("value", value)),
+            null, true, ct);
+
+    public Task<ThreatIntelStatusDto> RefreshThreatIntelAsync(CancellationToken ct = default) =>
+        SendAsync<ThreatIntelStatusDto>(HttpMethod.Post, ApiRoutes.ThreatIntelRefresh, null, true, ct);
+
+    public Task<IReadOnlyList<RuleSummaryDto>> GetRulesAsync(CancellationToken ct = default) =>
+        SendAsync<IReadOnlyList<RuleSummaryDto>>(HttpMethod.Get, ApiRoutes.Rules, null, true, ct);
+
+    public Task<RuleSummaryDto> ToggleRuleAsync(string id, bool enabled, CancellationToken ct = default) =>
+        SendAsync<RuleSummaryDto>(HttpMethod.Post, ApiRoutes.Fill(ApiRoutes.RuleToggle, id), new RuleToggleRequest(enabled), true, ct);
+
+    public Task<RulesReloadResultDto> ReloadRulesAsync(CancellationToken ct = default) =>
+        SendAsync<RulesReloadResultDto>(HttpMethod.Post, ApiRoutes.RulesReload, null, true, ct);
+
+    public Task<StaticScanResultDto> RunStaticScanAsync(string filePath, CancellationToken ct = default) =>
+        SendAsync<StaticScanResultDto>(HttpMethod.Post, ApiRoutes.StaticScan, new StaticScanRequest(filePath), true, ct);
+
+    public Task<MlModelStatusDto> GetMlStatusAsync(CancellationToken ct = default) =>
+        SendAsync<MlModelStatusDto>(HttpMethod.Get, ApiRoutes.MlStatus, null, true, ct);
+
+    public Task<IReadOnlyList<CanaryStatusDto>> GetCanariesAsync(CancellationToken ct = default) =>
+        SendAsync<IReadOnlyList<CanaryStatusDto>>(HttpMethod.Get, ApiRoutes.Canaries, null, true, ct);
+
+    public Task<IReadOnlyList<CanaryStatusDto>> RedeployCanariesAsync(CancellationToken ct = default) =>
+        SendAsync<IReadOnlyList<CanaryStatusDto>>(HttpMethod.Post, ApiRoutes.CanariesRedeploy, null, true, ct);
+
+    public Task<IReadOnlyList<FeedbackHistoryEntryDto>> GetFeedbackHistoryAsync(CancellationToken ct = default) =>
+        SendAsync<IReadOnlyList<FeedbackHistoryEntryDto>>(HttpMethod.Get, ApiRoutes.FeedbackHistory, null, true, ct);
+
+    public Task<FeedbackHistoryEntryDto> RevertFeedbackAsync(Guid id, CancellationToken ct = default) =>
+        SendAsync<FeedbackHistoryEntryDto>(HttpMethod.Post, ApiRoutes.Fill(ApiRoutes.FeedbackRevert, id), null, true, ct);
+
+    public Task<ClusterNarrativeDto?> GetClusterNarrativeAsync(Guid clusterId, CancellationToken ct = default) =>
+        SendAsync<ClusterNarrativeDto?>(HttpMethod.Get, $"/api/clusters/{clusterId}/narrative", null, true, ct);
+
     public async Task<bool> PingAsync(CancellationToken ct = default)
     {
         try
