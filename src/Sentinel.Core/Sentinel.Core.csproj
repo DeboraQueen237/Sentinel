@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Sentinel.Core</RootNamespace>
+    <Description>Cœur d'analyse : scoring hybride, baseline, moteur de corrélation, moteur de décision.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Sentinel.Shared\Sentinel.Shared.csproj" />
+    <ProjectReference Include="..\Sentinel.AI\Sentinel.AI.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sentinel.Core.Tests" />
+    <InternalsVisibleTo Include="Sentinel.Simulation" />
+  </ItemGroup>
+</Project>
