@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <RootNamespace>Sentinel.Server</RootNamespace>
+    <Description>Service d'analyse : ingestion gRPC (mTLS), pipeline, API REST, SignalR, rapports, audit.</Description>
+    <UserSecretsId>sentinel-server</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Sentinel.Shared\Sentinel.Shared.csproj" />
+    <ProjectReference Include="..\Sentinel.AI\Sentinel.AI.csproj" />
+    <ProjectReference Include="..\Sentinel.Core\Sentinel.Core.csproj" />
+    <ProjectReference Include="..\Sentinel.Storage\Sentinel.Storage.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="All" />
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="QuestPDF" />
+    <PackageReference Include="Otp.NET" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sentinel.Server.Tests" />
+  </ItemGroup>
+</Project>
