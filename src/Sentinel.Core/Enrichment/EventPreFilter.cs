@@ -180,8 +180,8 @@ public sealed class EventPreFilter
         string? filePath,
         string? sha256)
     {
-        // Les événements d'auto-protection ne sont jamais exclus
-        if (evt.Category == EventCategory.System)
+        // Les événements d'auto-protection, Defender et canaris ne sont jamais exclus
+        if (evt.Category is EventCategory.System or EventCategory.Defender or EventCategory.Canary)
         {
             return (false, null);
         }
