@@ -31,7 +31,19 @@ public static class MitreCatalog
         ["T1053.005"] = new("T1053.005", "Scheduled Task", "Persistence", "Persistance via le Planificateur de tâches Windows."),
         ["T1071"] = new("T1071", "Application Layer Protocol", "Command and Control", "Communication sortante vers un domaine ou une IP rare/suspecte."),
         ["T1105"] = new("T1105", "Ingress Tool Transfer", "Command and Control", "Téléchargement d'un outil ou charge utile externe."),
-        ["T1562"] = new("T1562", "Impair Defenses", "Defense Evasion", "Tentative d'arrêt, de désactivation ou d'altération de SENTINEL.")
+        ["T1562"] = new("T1562", "Impair Defenses", "Defense Evasion", "Tentative d'arrêt, de désactivation ou d'altération de SENTINEL ou de Defender."),
+        ["T1562.001"] = new("T1562.001", "Disable or Modify Tools", "Defense Evasion", "Désactivation de la protection temps réel ou ajout d'exclusions Microsoft Defender."),
+        ["T1562.006"] = new("T1562.006", "Indicator Blocking", "Defense Evasion", "Tentative de contournement de la journalisation PowerShell / AMSI."),
+        ["T1027"] = new("T1027", "Obfuscated Files or Information", "Defense Evasion", "Encodage, obfuscation ou empaquetage de scripts ou exécutables."),
+        ["T1027.002"] = new("T1027.002", "Software Packing", "Defense Evasion", "Binaire PE compressé ou protégé par un packer (UPX, entropie élevée)."),
+        ["T1140"] = new("T1140", "Deobfuscate/Decode Files or Information", "Defense Evasion", "Décodage à la volée (certutil, base64, PowerShell)."),
+        ["T1218.005"] = new("T1218.005", "Mshta", "Defense Evasion", "Exécution de contenu HTA ou script distant via mshta.exe."),
+        ["T1218.010"] = new("T1218.010", "Regsvr32", "Defense Evasion", "Exécution détournée via regsvr32.exe (Squiblydoo)."),
+        ["T1218.011"] = new("T1218.011", "Rundll32", "Defense Evasion", "Exécution de DLL ou script via rundll32.exe."),
+        ["T1197"] = new("T1197", "BITS Jobs", "Defense Evasion", "Téléchargement ou persistance via bitsadmin / BITS."),
+        ["T1047"] = new("T1047", "Windows Management Instrumentation", "Execution", "Exécution de commande ou processus via WMIC / WMI."),
+        ["T1003"] = new("T1003", "OS Credential Dumping", "Credential Access", "Tentative d'accès aux secrets ou au processus LSASS."),
+        ["T1490"] = new("T1490", "Inhibit System Recovery", "Impact", "Suppression des clichés instantanés (vssadmin, wbadmin, bcdedit).")
     };
 
     public static MitreTechniqueInfo? TryGet(string id) =>

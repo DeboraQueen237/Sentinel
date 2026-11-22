@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Moteur YARA et analyse statique PE (PeNet + dnYara avec repli managé documenté) pour SENTINEL v2.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Sentinel.Shared\Sentinel.Shared.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="PeNet" />
+    <PackageReference Include="dnYara" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+</Project>

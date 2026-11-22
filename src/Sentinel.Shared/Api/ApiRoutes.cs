@@ -59,6 +59,31 @@ public static class ApiRoutes
     // Système
     public const string Health = "/api/system/health";                // GET -> SystemHealthDto
     public const string Ping = "/api/system/ping";                    // GET (anonyme) -> "pong"
+    public const string AgentsHealth = "/api/system/agents";          // GET -> AgentHealthDto[]
+
+    // Threat Intelligence (v2 M4)
+    public const string ThreatIntelStatus = "/api/intel/status";      // GET -> ThreatIntelStatusDto
+    public const string ThreatIntelLookup = "/api/intel/lookup";      // GET ?type=hash|domain|url|ip&value=... -> ThreatIntelLookupDto
+    public const string ThreatIntelRefresh = "/api/intel/refresh";    // POST -> ThreatIntelStatusDto
+
+    // Règles Sigma & YARA (v2 M2, M3)
+    public const string Rules = "/api/rules";                         // GET -> RuleSummaryDto[]
+    public const string RuleToggle = "/api/rules/{id}/toggle";        // POST RuleToggleRequest -> RuleSummaryDto
+    public const string RulesReload = "/api/rules/reload";            // POST -> RulesReloadResultDto
+
+    // Analyse statique à la demande (v2 M3)
+    public const string StaticScan = "/api/static/scan";              // POST StaticScanRequest -> StaticScanResultDto
+
+    // Modèle ML PE (v2 M5)
+    public const string MlStatus = "/api/ml/status";                  // GET -> MlModelStatusDto
+
+    // Fichiers canari (v2 M6)
+    public const string Canaries = "/api/canaries";                   // GET -> CanaryStatusDto[]
+    public const string CanariesRedeploy = "/api/canaries/redeploy";  // POST -> CanaryStatusDto[]
+
+    // Retours analyste / corrélation (v2 M8)
+    public const string FeedbackHistory = "/api/feedback";            // GET -> FeedbackHistoryEntryDto[]
+    public const string FeedbackRevert = "/api/feedback/{id:guid}/revert"; // POST -> FeedbackHistoryEntryDto
 
     /// <summary>Remplace les paramètres de route : <c>ApiRoutes.Fill(ApiRoutes.AlertById, id)</c>.</summary>
     public static string Fill(string route, params object[] values)

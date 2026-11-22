@@ -13,7 +13,17 @@ public enum EventCategory
     Typing = 7,
     Installation = 8,
     /// <summary>Événements internes à SENTINEL (auto-protection, watchdog, intégrité).</summary>
-    System = 9
+    System = 9,
+    /// <summary>Détections et état de santé Microsoft Defender (v2 M1).</summary>
+    Defender = 10,
+    /// <summary>Visibilité scripts PowerShell 4104 / ETW AMSI (v2 M7).</summary>
+    Script = 11,
+    /// <summary>Alertes fichiers canari anti-ransomware (v2 M6).</summary>
+    Canary = 12,
+    /// <summary>Résultats d'analyse statique PE / YARA (v2 M3).</summary>
+    StaticAnalysis = 13,
+    /// <summary>Correspondances flux de renseignement sur les menaces (v2 M4).</summary>
+    ThreatIntel = 14
 }
 
 /// <summary>Type de menace attribué par le scoring (doc §5.2 / §9.2).</summary>
@@ -47,7 +57,12 @@ public enum AssessmentSource
 {
     Rules = 0,
     Llm = 1,
-    Hybrid = 2
+    Hybrid = 2,
+    Sigma = 3,
+    Yara = 4,
+    ThreatIntel = 5,
+    MachineLearning = 6,
+    MultiEngine = 7
 }
 
 /// <summary>Mode de fonctionnement global du moteur de décision (doc §9.4).</summary>

@@ -201,6 +201,40 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> ListInstalledModelsAsync(CancellationToken ct = default)
+    {
+        var cfg = _settings;
+        var url = $"{NormalizeEndpoint(cfg.Endpoint)}/api/tags";
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        linkedCts.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(cfg.TimeoutSeconds, 1, 5)));
+        try
+        {
+            using var response = await _http.GetAsync(url, linkedCts.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return Array.Empty<string>();
+            await using var stream = await response.Content.ReadAsStreamAsync(linkedCts.Token).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: linkedCts.Token).ConfigureAwait(false);
+            if (!doc.RootElement.TryGetProperty("models", out var modelsEl) || modelsEl.ValueKind != JsonValueKind.Array)
+                return Array.Empty<string>();
+
+            var list = new List<string>();
+            foreach (var item in modelsEl.EnumerateArray())
+            {
+                var name = TryGetString(item, "name") ?? TryGetString(item, "model");
+                if (!string.IsNullOrWhiteSpace(name)) list.Add(name);
+            }
+            return list;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<LlmAssessmentResult?> AssessAsync(LlmScoringContext context, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(context);

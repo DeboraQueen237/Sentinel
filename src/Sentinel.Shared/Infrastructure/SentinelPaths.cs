@@ -28,11 +28,19 @@ public static class SentinelPaths
     public static string Outbox => Ensure("Outbox");
     public static string Reports => Ensure("Reports");
     public static string Secrets => Ensure("Secrets");
+    public static string Rules => Ensure("rules");
+    public static string SigmaRules => Ensure(Path.Combine("rules", "sigma"));
+    public static string YaraRules => Ensure(Path.Combine("rules", "yara"));
+    public static string Models => Ensure("models");
 
     public static string ServerDatabase => Path.Combine(Data, "sentinel.db");
+    public static string ThreatIntelDatabase => Path.Combine(Data, "threat-intel.db");
     public static string AgentOutboxDatabase => Path.Combine(Outbox, "agent-outbox.db");
     public static string AgentStateFile => Path.Combine(Data, "agent-state.json");
     public static string ConsentFile => Path.Combine(Data, "consent.json");
+    public static string CanariesRegistryFile => Path.Combine(Data, "canaries.json");
+    public static string MlModelFile => Path.Combine(Models, "pe-classifier.zip");
+    public static string MlModelMetadataFile => Path.Combine(Models, "pe-classifier.meta.json");
 
     private static string Ensure(string sub)
     {

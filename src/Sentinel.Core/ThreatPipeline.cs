@@ -434,6 +434,58 @@ public sealed class ThreatPipeline : IThreatPipeline
         EnableClipboardMonitoring = s.EnableClipboardMonitoring,
         EnableTypingRhythm = s.EnableTypingRhythm,
         EnableBrowserMonitoring = s.EnableBrowserMonitoring,
-        EnableNetworkMonitoring = s.EnableNetworkMonitoring
+        EnableNetworkMonitoring = s.EnableNetworkMonitoring,
+        EnableDefenderCollector = s.EnableDefenderCollector,
+        EnableSysmonCollector = s.EnableSysmonCollector,
+        Canaries = new CanarySettings
+        {
+            Enabled = s.Canaries.Enabled,
+            FilesPerFolder = s.Canaries.FilesPerFolder,
+            Folders = new List<string>(s.Canaries.Folders),
+            AutoIsolateOnTrigger = s.Canaries.AutoIsolateOnTrigger
+        },
+        ScriptVisibility = new ScriptVisibilitySettings
+        {
+            Enabled = s.ScriptVisibility.Enabled,
+            EnablePowerShell4104 = s.ScriptVisibility.EnablePowerShell4104,
+            EnableEtwAmsi = s.ScriptVisibility.EnableEtwAmsi,
+            StoreSanitizedExcerpt = s.ScriptVisibility.StoreSanitizedExcerpt,
+            MaxExcerptLength = s.ScriptVisibility.MaxExcerptLength
+        },
+        ThreatIntel = new ThreatIntelSettings
+        {
+            Enabled = s.ThreatIntel.Enabled,
+            EnableAbuseChFeeds = s.ThreatIntel.EnableAbuseChFeeds,
+            EnableOpenPhishCommunity = s.ThreatIntel.EnableOpenPhishCommunity,
+            EnablePhishTank = s.ThreatIntel.EnablePhishTank,
+            EnableVirusTotalOnDemand = s.ThreatIntel.EnableVirusTotalOnDemand,
+            RefreshIntervalHours = s.ThreatIntel.RefreshIntervalHours,
+            IndicatorTtlDays = s.ThreatIntel.IndicatorTtlDays
+        },
+        StaticScan = new StaticScanSettings
+        {
+            Enabled = s.StaticScan.Enabled,
+            ScanOnFileEvent = s.StaticScan.ScanOnFileEvent,
+            ScanOnProcessStart = s.StaticScan.ScanOnProcessStart,
+            MaxFileSizeBytes = s.StaticScan.MaxFileSizeBytes,
+            TimeoutMs = s.StaticScan.TimeoutMs,
+            MaxConcurrency = s.StaticScan.MaxConcurrency,
+            ScheduledScanIntervalHours = s.StaticScan.ScheduledScanIntervalHours
+        },
+        Rules = new RulesSettings
+        {
+            EnableSigma = s.Rules.EnableSigma,
+            EnableYara = s.Rules.EnableYara,
+            HotReload = s.Rules.HotReload,
+            DisabledRuleIds = new List<string>(s.Rules.DisabledRuleIds),
+            ExcludedRuleTargets = new List<string>(s.Rules.ExcludedRuleTargets)
+        },
+        MachineLearning = new MlSettings
+        {
+            Enabled = s.MachineLearning.Enabled,
+            MaxScoreContribution = s.MachineLearning.MaxScoreContribution,
+            SuspiciousProbabilityThreshold = s.MachineLearning.SuspiciousProbabilityThreshold
+        },
+        Language = s.Language
     };
 }

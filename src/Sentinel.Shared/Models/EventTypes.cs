@@ -59,6 +59,41 @@ public static class EventTypes
     public const string AgentTampering = "AgentTampering";
     public const string IntegrityViolation = "IntegrityViolation";
     public const string Heartbeat = "Heartbeat";
+
+    // Microsoft Defender (v2 M1)
+    public const string DefenderThreatDetected = "DefenderThreatDetected";
+    public const string DefenderActionTaken = "DefenderActionTaken";
+    public const string DefenderRealtimeDisabled = "DefenderRealtimeDisabled";
+    public const string DefenderExclusionAdded = "DefenderExclusionAdded";
+    public const string DefenderServiceStopped = "DefenderServiceStopped";
+    public const string DefenderTampering = "DefenderTampering";
+
+    // Sysmon optionnel (v2 M1)
+    public const string SysmonProcessCreate = "SysmonProcessCreate";
+    public const string SysmonNetworkConnect = "SysmonNetworkConnect";
+    public const string SysmonFileCreate = "SysmonFileCreate";
+    public const string SysmonRegistryEvent = "SysmonRegistryEvent";
+    public const string SysmonTaskEvent = "SysmonTaskEvent";
+
+    // Analyse statique / YARA / ML (v2 M3, M5)
+    public const string YaraMatch = "YaraMatch";
+    public const string PeStaticAnomaly = "PeStaticAnomaly";
+    public const string StaticScanCompleted = "StaticScanCompleted";
+    public const string MlPeClassification = "MlPeClassification";
+
+    // Threat Intelligence (v2 M4)
+    public const string ThreatIntelMatch = "ThreatIntelMatch";
+
+    // Fichiers canari anti-ransomware (v2 M6)
+    public const string CanaryModified = "CanaryModified";
+    public const string CanaryRenamed = "CanaryRenamed";
+    public const string CanaryDeleted = "CanaryDeleted";
+    public const string CanaryEncrypted = "CanaryEncrypted";
+
+    // Visibilité scripts (v2 M7 — PowerShell 4104 + ETW AMSI)
+    public const string PowerShellScriptBlock = "PowerShellScriptBlock";
+    public const string AmsiScriptScan = "AmsiScriptScan";
+    public const string ScriptLoggingBypass = "ScriptLoggingBypass";
 }
 
 /// <summary>
@@ -162,6 +197,68 @@ public static class AttributeKeys
     public const string AgentVersion = "agent.version";
     public const string Reason = "reason";
     public const string Component = "component";
+
+    // Dédoublonnage multi-sources (v2 M1)
+    public const string CollectorSource = "collector.source";
+    public const string EventSources = "event.sources";
+    public const string DeduplicatedCount = "event.dedup.count";
+
+    // Microsoft Defender (v2 M1)
+    public const string DefenderThreatId = "defender.threat.id";
+    public const string DefenderThreatName = "defender.threat.name";
+    public const string DefenderSeverity = "defender.severity";
+    public const string DefenderCategory = "defender.category";
+    public const string DefenderAction = "defender.action";
+    public const string DefenderExclusion = "defender.exclusion";
+    public const string DefenderStatus = "defender.status";
+
+    // Sysmon (v2 M1)
+    public const string SysmonEventId = "sysmon.event.id";
+    public const string SysmonRuleName = "sysmon.rule";
+    public const string SysmonHashes = "sysmon.hashes";
+    public const string TargetObject = "reg.target.object";
+
+    // Sigma / YARA / Analyse statique PE (v2 M2, M3)
+    public const string SigmaRuleId = "sigma.rule.id";
+    public const string SigmaRuleTitle = "sigma.rule.title";
+    public const string SigmaLevel = "sigma.level";
+    public const string YaraRule = "yara.rule";
+    public const string YaraNamespace = "yara.namespace";
+    public const string YaraEngine = "yara.engine";
+    public const string PePacker = "pe.packer";
+    public const string PeCompileTime = "pe.compile.time";
+    public const string PeSuspiciousImports = "pe.imports.suspicious";
+    public const string PeSigned = "pe.signed";
+    public const string PeSectionCount = "pe.sections";
+    public const string PeMaxEntropy = "pe.entropy.max";
+
+    // Threat Intelligence (v2 M4)
+    public const string ThreatIntelSource = "ti.source";
+    public const string ThreatIntelIndicator = "ti.indicator";
+    public const string ThreatIntelIndicatorType = "ti.indicator.type";
+    public const string ThreatIntelThreat = "ti.threat";
+    public const string ThreatIntelFirstSeen = "ti.first.seen";
+    public const string ThreatIntelConfidence = "ti.confidence";
+
+    // Machine Learning PE (v2 M5)
+    public const string MlScore = "ml.score";
+    public const string MlModelVersion = "ml.model.version";
+    public const string MlTopFeatures = "ml.features.top";
+
+    // Fichiers canari (v2 M6)
+    public const string CanaryId = "canary.id";
+    public const string CanaryFolder = "canary.folder";
+    public const string CanaryExpectedHash = "canary.hash.expected";
+    public const string CanaryObservedHash = "canary.hash.observed";
+
+    // Visibilité scripts (v2 M7)
+    public const string ScriptBlockId = "script.block.id";
+    public const string ScriptPath = "script.path";
+    public const string ScriptHash = "script.hash";
+    public const string ScriptLength = "script.length";
+    public const string ScriptIndicators = "script.indicators";
+    public const string ScriptExcerpt = "script.excerpt";
+    public const string ScriptObfuscationScore = "script.obfuscation";
 }
 
 /// <summary>Noms des dossiers surveillés (valeur de <see cref="AttributeKeys.WatchedFolder"/>).</summary>
