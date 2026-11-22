@@ -1,0 +1,8 @@
+<span class="badge @UiFormatters.ThreatLevelCss(Level)">
+    <span class="badge-dot"></span>
+    @UiFormatters.ThreatLevelLabel(Level)
+</span>
+
+@code {
+    [Parameter, EditorRequired] public ThreatLevel Level { get; set; }
+}

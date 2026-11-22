@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <title>SENTINEL — Console SOC</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem("sentinel-theme");
+                if (saved === "light" || saved === "dark") {
+                    document.documentElement.setAttribute("data-theme", saved);
+                }
+            } catch (e) { }
+        })();
+    </script>
+    <link rel="stylesheet" href="css/sentinel.css" />
+    <HeadOutlet @rendermode="NoPrerender" />
+</head>
+<body>
+    <Routes @rendermode="NoPrerender" />
+
+    <div id="blazor-error-ui">
+        <span>Une erreur inattendue est survenue dans la console.</span>
+        <a href="" class="btn btn-sm btn-primary">Recharger</a>
+        <span class="dismiss">✕</span>
+    </div>
+
+    <script src="lib/chart.umd.js"></script>
+    <script src="lib/cytoscape.min.js"></script>
+    <script src="js/sentinel-utils.js"></script>
+    <script src="js/sentinel-charts.js"></script>
+    <script src="js/sentinel-graph.js"></script>
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>
+
+@code {
+    private static readonly InteractiveServerRenderMode NoPrerender = new(prerender: false);
+}

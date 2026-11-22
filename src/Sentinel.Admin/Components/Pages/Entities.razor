@@ -1,0 +1,249 @@
+@page "/entities"
+@inject SentinelApiClient Api
+@inject LiveHubClient Hub
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>Postes &amp; Entités — SENTINEL</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Fiches Postes &amp; Entités</h1>
+        <p class="page-subtitle">Inventaire des postes surveillés, comptes, domaines, processus, fichiers et périphériques</p>
+    </div>
+    <div class="page-actions">
+        <button type="button" class="btn btn-primary" @onclick="LoadActiveTabAsync" disabled="@_loading">
+            @(_loading ? "Chargement…" : "Actualiser")
+        </button>
+    </div>
+</div>
+
+<ErrorBanner Message="@_error" OnRetry="LoadActiveTabAsync" />
+
+<div class="tabs" role="tablist">
+    <button type="button" class="tab-btn @(_tab == "hosts" ? "active" : "")" @onclick='() => SwitchTabAsync("hosts")'>
+        Postes surveillés (@_hosts.Count)
+    </button>
+    <button type="button" class="tab-btn @(_tab == "entities" ? "active" : "")" @onclick='() => SwitchTabAsync("entities")'>
+        Annuaire d'entités (@_entities.Count)
+    </button>
+</div>
+
+@if (_tab == "hosts")
+{
+    @if (_loading && _hosts.Count == 0)
+    {
+        <SkeletonCards Count="4" />
+    }
+    else if (_hosts.Count == 0)
+    {
+        <div class="card">
+            <EmptyState Title="Aucun poste enregistré"
+                        Subtitle="Démarrez Sentinel.Agent sur un poste Windows pour qu'il apparaisse automatiquement ici." />
+        </div>
+    }
+    else
+    {
+        <div class="grid-3">
+            @foreach (var host in _hosts.OrderByDescending(h => h.Online).ThenByDescending(h => h.RiskScore))
+            {
+                <div class="card card-hover" style="cursor:pointer;" @onclick='() => Nav.NavigateTo(UiFormatters.EntityDetailHref(EntityKind.Host, host.HostId))'>
+                    <div class="row-wrap" style="justify-content:space-between;margin-bottom:10px;">
+                        <div class="row-wrap" style="gap:8px;">
+                            <span class="pulse-dot @(host.Online ? "online" : "offline")"></span>
+                            <strong style="font-size:15px;">@host.MachineName</strong>
+                        </div>
+                        <span class="badge @(host.Online ? "act-reverted" : "status-fp")">@(host.Online ? "En ligne" : "Hors ligne")</span>
+                    </div>
+
+                    <div class="mono text-muted" style="font-size:11.5px;margin-bottom:10px;">ID : @host.HostId</div>
+
+                    <div style="margin-bottom:12px;">
+                        <div class="field-label" style="margin-bottom:4px;">Score de risque</div>
+                        <ScoreBar Score="host.RiskScore" />
+                    </div>
+
+                    <div class="stack-sm" style="gap:5px;font-size:12px;">
+                        <div class="row-wrap" style="justify-content:space-between;">
+                            <span class="text-secondary">Système</span>
+                            <span class="truncate" style="max-width:190px;" title="@host.OsVersion">@host.OsVersion</span>
+                        </div>
+                        <div class="row-wrap" style="justify-content:space-between;">
+                            <span class="text-secondary">Agent SENTINEL</span>
+                            <span class="mono">v@(host.AgentVersion)</span>
+                        </div>
+                        <div class="row-wrap" style="justify-content:space-between;">
+                            <span class="text-secondary">Alertes ouvertes</span>
+                            <strong class="mono @(host.OpenAlerts > 0 ? "text-crimson" : "text-emerald")">@host.OpenAlerts</strong>
+                        </div>
+                        <div class="row-wrap" style="justify-content:space-between;">
+                            <span class="text-secondary">Dernière activité</span>
+                            <span class="mono">@UiFormatters.RelativeTime(host.LastSeen)</span>
+                        </div>
+                    </div>
+
+                    @if (host.Users.Count > 0)
+                    {
+                        <div class="tag-list" style="margin-top:12px;">
+                            @foreach (var u in host.Users.Take(4))
+                            {
+                                <span class="tag-item">@u</span>
+                            }
+                            @if (host.Users.Count > 4)
+                            {
+                                <span class="tag-item">+@(host.Users.Count - 4)</span>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+}
+else
+{
+    <div class="filter-bar">
+        <div class="field search-field">
+            <label class="field-label">Recherche d'entité</label>
+            <input class="input" placeholder="Nom d'utilisateur, domaine, processus, chemin, IP…"
+                   @bind="_search" @bind:event="oninput" @onkeydown="OnSearchKeyDown" />
+        </div>
+
+        <div class="field">
+            <label class="field-label">Type d'entité</label>
+            <select class="select" @bind="_kindFilter" @bind:after="LoadEntitiesAsync">
+                <option value="">Tous les types</option>
+                @foreach (var k in Enum.GetValues<EntityKind>())
+                {
+                    <option value="@k">@UiFormatters.EntityKindLabel(k)</option>
+                }
+            </select>
+        </div>
+
+        <button type="button" class="btn btn-primary" @onclick="LoadEntitiesAsync">Rechercher</button>
+    </div>
+
+    @if (_loading && _entities.Count == 0)
+    {
+        <SkeletonCards Count="4" />
+    }
+    else if (_entities.Count == 0)
+    {
+        <div class="card">
+            <EmptyState Title="Aucune entité trouvée"
+                        Subtitle="Modifiez votre filtre de type ou votre recherche." />
+        </div>
+    }
+    else
+    {
+        <div class="table-scroll">
+            <table class="soc-table">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Entité</th>
+                        <th>Score de risque</th>
+                        <th>Événements</th>
+                        <th>Alertes</th>
+                        <th>Dernière observation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var entity in _entities)
+                    {
+                        <tr class="clickable" @onclick='() => Nav.NavigateTo(UiFormatters.EntityDetailHref(entity.Kind, entity.Key))'>
+                            <td>
+                                <span class="badge" style="background:var(--accent-cyan-soft);color:var(--accent-cyan);">
+                                    @UiFormatters.EntityKindLabel(entity.Kind)
+                                </span>
+                            </td>
+                            <td style="max-width:360px;">
+                                <div style="font-weight:700;" class="truncate">@entity.Label</div>
+                                @if (!string.Equals(entity.Label, entity.Key, StringComparison.Ordinal))
+                                {
+                                    <div class="mono text-muted truncate" style="font-size:11.5px;">@entity.Key</div>
+                                }
+                            </td>
+                            <td><ScoreBar Score="entity.RiskScore" /></td>
+                            <td class="mono">@entity.EventCount.ToString("N0", CultureInfo.GetCultureInfo("fr-FR"))</td>
+                            <td>
+                                <strong class="mono @(entity.AlertCount > 0 ? "text-crimson" : "text-muted")">@entity.AlertCount</strong>
+                            </td>
+                            <td class="mono" style="font-size:12px;">
+                                <div>@UiFormatters.FormatShortDateTime(entity.LastSeen)</div>
+                                <div class="text-muted" style="font-size:11px;">@UiFormatters.RelativeTime(entity.LastSeen)</div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    private string _tab = "hosts";
+    private IReadOnlyList<HostDto> _hosts = Array.Empty<HostDto>();
+    private IReadOnlyList<EntitySummaryDto> _entities = Array.Empty<EntitySummaryDto>();
+    private string _kindFilter = string.Empty;
+    private string _search = string.Empty;
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Hub.HostStatusChanged += OnHostStatusChanged;
+        await LoadHostsAsync();
+    }
+
+    private async Task SwitchTabAsync(string tab)
+    {
+        _tab = tab;
+        await LoadActiveTabAsync();
+    }
+
+    private Task LoadActiveTabAsync() => _tab == "hosts" ? LoadHostsAsync() : LoadEntitiesAsync();
+
+    private async Task LoadHostsAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _hosts = await Api.GetHostsAsync();
+        }
+        catch (SentinelApiException ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task LoadEntitiesAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            EntityKind? kind = Enum.TryParse<EntityKind>(_kindFilter, true, out var k) ? k : null;
+            _entities = await Api.GetEntitiesAsync(kind, string.IsNullOrWhiteSpace(_search) ? null : _search.Trim(), 120);
+        }
+        catch (SentinelApiException ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private Task OnSearchKeyDown(KeyboardEventArgs e) =>
+        e.Key == "Enter" ? LoadEntitiesAsync() : Task.CompletedTask;
+
+    private void OnHostStatusChanged(HostDto host)
+    {
+        var list = _hosts.ToList();
+        var idx = list.FindIndex(h => h.HostId == host.HostId);
+        if (idx >= 0) list[idx] = host;
+        else list.Add(host);
+        _hosts = list;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Hub.HostStatusChanged -= OnHostStatusChanged;
+    }
+}

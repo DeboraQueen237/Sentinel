@@ -1,0 +1,264 @@
+@page "/setup"
+@layout AuthLayout
+@inject SentinelApiClient Api
+@inject AdminSessionState Session
+@inject ToastService Toasts
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<PageTitle>Configuration initiale — SENTINEL</PageTitle>
+
+<div class="auth-card wide">
+    <div class="auth-logo-wrap">
+        <ShieldLogo Size="56" />
+        <div>
+            <h1 style="margin:0;font-size:21px;font-weight:800;">Configuration initiale SENTINEL</h1>
+            <p class="text-secondary" style="margin:4px 0 0;font-size:13px;">
+                @(_setupResult is null
+                    ? "Étape 1 / 2 — Créez le compte administrateur unique"
+                    : "Étape 2 / 2 — Scannez le QR Code et activez la double authentification TOTP")
+            </p>
+        </div>
+    </div>
+
+    @if (_checkingStatus)
+    {
+        <div class="stack-sm">
+            <div class="skeleton" style="height:40px;"></div>
+            <div class="skeleton" style="height:40px;"></div>
+            <div class="skeleton" style="height:44px;"></div>
+        </div>
+    }
+    else if (_setupResult is null)
+    {
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="error-banner" style="margin-bottom:16px;padding:10px 12px;">
+                <span style="font-size:12.5px;">@_error</span>
+            </div>
+        }
+
+        <form @onsubmit="CreateAccountAsync" class="stack-md">
+            <div class="field">
+                <label class="field-label" for="setup-user">Nom d'utilisateur administrateur</label>
+                <input id="setup-user" class="input" placeholder="admin" @bind="_username" required disabled="@_submitting" />
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="setup-pass">Mot de passe fort</label>
+                <input id="setup-pass" type="password" class="input" placeholder="12 caractères minimum, majuscule, chiffre et symbole"
+                       @bind="_password" @bind:event="oninput" required disabled="@_submitting" />
+                <div class="score-wrap" style="margin-top:4px;">
+                    <div class="score-track">
+                        <div class="score-fill" style="width:@(PasswordStrengthScore)%;background:@PasswordStrengthColor;"></div>
+                    </div>
+                    <span style="font-size:11.5px;font-weight:700;color:@PasswordStrengthColor;">@PasswordStrengthLabel</span>
+                </div>
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="setup-confirm">Confirmer le mot de passe</label>
+                <input id="setup-confirm" type="password" class="input" placeholder="Répétez le mot de passe"
+                       @bind="_confirmPassword" required disabled="@_submitting" />
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-lg" style="width:100%;" disabled="@_submitting">
+                @(_submitting ? "Initialisation…" : "Créer le compte et générer le QR Code TOTP")
+            </button>
+        </form>
+    }
+    else
+    {
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="error-banner" style="margin-bottom:16px;padding:10px 12px;">
+                <span style="font-size:12.5px;">@_error</span>
+            </div>
+        }
+
+        <div class="stack-md" style="align-items:center;">
+            @if (!string.IsNullOrWhiteSpace(_qrDataUri))
+            {
+                <div class="qr-frame">
+                    <img src="@_qrDataUri" alt="QR Code TOTP SENTINEL" />
+                </div>
+            }
+
+            <div style="width:100%;">
+                <div class="field-label" style="margin-bottom:6px;">Clé manuelle Base32 (à conserver en lieu sûr)</div>
+                <div class="secret-box">
+                    <span>@_setupResult.TotpSecret</span>
+                    <button type="button" class="btn btn-sm btn-primary" @onclick="CopySecretAsync">Copier</button>
+                </div>
+            </div>
+
+            <form @onsubmit="VerifyAndActivateAsync" class="stack-md" style="width:100%;">
+                <div class="field">
+                    <div class="row-between" style="margin-bottom:4px;">
+                        <label class="field-label" for="verify-totp">Validez immédiatement avec le code à 6 chiffres</label>
+                        <button type="button" class="btn btn-xs btn-ghost" @onclick="FillCurrentTotp">
+                            Pré-remplir le code TOTP actuel
+                        </button>
+                    </div>
+                    <input id="verify-totp" class="input totp-input" inputmode="numeric" maxlength="6"
+                           placeholder="000000" @bind="_totpCode" required disabled="@_submitting" />
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-lg" style="width:100%;" disabled="@_submitting">
+                    @(_submitting ? "Activation…" : "Activer le compte et accéder au dashboard")
+                </button>
+            </form>
+        </div>
+    }
+</div>
+
+@code {
+    private bool _checkingStatus = true;
+    private bool _submitting;
+    private string? _error;
+
+    private string _username = "admin";
+    private string _password = string.Empty;
+    private string _confirmPassword = string.Empty;
+    private string _totpCode = string.Empty;
+
+    private SetupResponse? _setupResult;
+    private string? _qrDataUri;
+
+    private int PasswordStrengthScore
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(_password)) return 0;
+            var score = 0;
+            if (_password.Length >= 8) score += 25;
+            if (_password.Length >= 12) score += 20;
+            if (_password.Any(char.IsUpper)) score += 15;
+            if (_password.Any(char.IsLower)) score += 10;
+            if (_password.Any(char.IsDigit)) score += 15;
+            if (_password.Any(c => !char.IsLetterOrDigit(c))) score += 15;
+            return Math.Min(100, score);
+        }
+    }
+
+    private string PasswordStrengthColor => PasswordStrengthScore switch
+    {
+        >= 80 => "var(--accent-emerald)",
+        >= 55 => "var(--accent-amber)",
+        _ => "var(--accent-crimson)"
+    };
+
+    private string PasswordStrengthLabel => PasswordStrengthScore switch
+    {
+        >= 80 => "Robuste",
+        >= 55 => "Moyen",
+        > 0 => "Faible",
+        _ => "—"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Session.InitializeAsync();
+        if (Session.IsAuthenticated)
+        {
+            Nav.NavigateTo("/", replace: true);
+            return;
+        }
+
+        try
+        {
+            var status = await Api.GetAuthStatusAsync();
+            if (status.IsConfigured)
+            {
+                Nav.NavigateTo("/login", replace: true);
+                return;
+            }
+        }
+        catch (SentinelApiException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _checkingStatus = false;
+        }
+    }
+
+    private async Task CreateAccountAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_username) || _username.Trim().Length < 3)
+        {
+            _error = "Le nom d'utilisateur doit comporter au moins 3 caractères.";
+            return;
+        }
+        if (_password.Length < 10)
+        {
+            _error = "Choisissez un mot de passe d'au moins 10 caractères (majuscule, minuscule, chiffre).";
+            return;
+        }
+        if (_password != _confirmPassword)
+        {
+            _error = "Les deux mots de passe ne correspondent pas.";
+            return;
+        }
+
+        _submitting = true;
+        try
+        {
+            var resp = await Api.SetupAsync(new SetupRequest(_username.Trim(), _password));
+            _setupResult = resp;
+            _qrDataUri = QrCodeHelper.GeneratePngDataUri(resp.OtpAuthUri, 7);
+            Toasts.Success("Compte initialisé", "Scannez le QR Code puis saisissez le code à 6 chiffres.");
+        }
+        catch (SentinelApiException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private async Task CopySecretAsync()
+    {
+        if (_setupResult is null) return;
+        var ok = await JS.InvokeAsync<bool>("sentinelUtils.copyText", _setupResult.TotpSecret);
+        if (ok) Toasts.Success("Copié", "Clé secrète TOTP copiée dans le presse-papiers.");
+    }
+
+    private void FillCurrentTotp()
+    {
+        if (_setupResult is null) return;
+        _totpCode = QrCodeHelper.ComputeTotpCode(_setupResult.TotpSecret);
+    }
+
+    private async Task VerifyAndActivateAsync()
+    {
+        _error = null;
+        var cleanCode = new string(_totpCode.Where(char.IsDigit).ToArray());
+        if (cleanCode.Length != 6)
+        {
+            _error = "Saisissez le code TOTP à 6 chiffres affiché dans votre application.";
+            return;
+        }
+
+        _submitting = true;
+        try
+        {
+            var login = await Api.LoginAsync(new LoginRequest(_username.Trim(), _password, cleanCode));
+            await Session.SetSessionAsync(login);
+            Toasts.Success("SENTINEL activé", "Authentification 2FA confirmée avec succès.");
+            Nav.NavigateTo("/", replace: true);
+        }
+        catch (SentinelApiException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+}

@@ -1,0 +1,21 @@
+<svg class="shield-svg" width="@Size" height="@Size" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+        <linearGradient id="@_gradId" x1="6" y1="4" x2="42" y2="44" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#06b6d4" />
+            <stop offset="55%" stop-color="#3b82f6" />
+            <stop offset="100%" stop-color="#8b5cf6" />
+        </linearGradient>
+    </defs>
+    <path d="M24 4L40 10.5V22.8C40 33.4 33.1 41.4 24 44.5C14.9 41.4 8 33.4 8 22.8V10.5L24 4Z"
+          fill="url(#@_gradId)" fill-opacity="0.16" stroke="url(#@_gradId)" stroke-width="2.4" stroke-linejoin="round" />
+    <path d="M24 9.5L35 14V22.5C35 30.2 30.2 36.1 24 38.6C17.8 36.1 13 30.2 13 22.5V14L24 9.5Z"
+          stroke="url(#@_gradId)" stroke-opacity="0.45" stroke-width="1.2" />
+    <circle cx="24" cy="23" r="5.5" stroke="#06b6d4" stroke-width="2" class="shield-pulse" />
+    <circle cx="24" cy="23" r="2.2" fill="#06b6d4" />
+    <path d="M24 14.5V17.5M24 28.5V31.5M15.5 23H18.5M29.5 23H32.5" stroke="#38bdf8" stroke-width="1.6" stroke-linecap="round" />
+</svg>
+
+@code {
+    [Parameter] public int Size { get; set; } = 36;
+    private readonly string _gradId = $"sg-{Guid.NewGuid():N}";
+}

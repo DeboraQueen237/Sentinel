@@ -1,0 +1,466 @@
+@page "/alerts/{Id:guid}"
+@inject SentinelApiClient Api
+@inject LiveHubClient Hub
+@inject ToastService Toasts
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>Alerte — SENTINEL</PageTitle>
+
+<div style="margin-bottom:14px;">
+    <a href="/alerts" class="btn btn-sm btn-ghost">← Retour aux alertes</a>
+</div>
+
+<ErrorBanner Message="@_error" OnRetry="LoadAsync" />
+
+@if (_loading && _detail is null)
+{
+    <SkeletonCards Count="3" />
+}
+else if (_detail is not null)
+{
+    var alert = _detail.Alert;
+
+    <div class="card" style="margin-bottom:18px;border-left:4px solid @UiFormatters.ThreatLevelHex(alert.Level);">
+        <div class="page-header" style="margin-bottom:14px;">
+            <div style="min-width:0;flex:1;">
+                <div class="row-wrap" style="gap:8px;margin-bottom:8px;">
+                    <SeverityBadge Level="alert.Level" />
+                    <span class="badge @UiFormatters.AlertStatusCss(alert.Status)">@UiFormatters.AlertStatusLabel(alert.Status)</span>
+                    <span class="badge" style="background:var(--bg-elevated);border-color:var(--border-strong);">@UiFormatters.ThreatTypeLabel(alert.ThreatType)</span>
+                    @if (alert.RequiresDecision && alert.Status == AlertStatus.Open)
+                    {
+                        <span class="badge act-proposed">Décision humaine requise (Niv. 3)</span>
+                    }
+                </div>
+                <h1 class="page-title">@alert.Title</h1>
+                <p class="page-subtitle">@alert.Summary</p>
+                <div class="row-wrap" style="margin-top:10px;font-size:12.5px;color:var(--text-secondary);">
+                    <span>Poste : <a class="mono" href="@UiFormatters.EntityDetailHref(EntityKind.Host, alert.HostId)">@alert.HostId</a></span>
+                    <span>•</span>
+                    <span>Utilisateur : <a class="mono" href="@UiFormatters.EntityDetailHref(EntityKind.User, alert.UserId)">@alert.UserId</a></span>
+                    <span>•</span>
+                    <span class="mono">Créée le @UiFormatters.FormatDateTime(alert.CreatedAt)</span>
+                </div>
+            </div>
+
+            <div class="stack-sm" style="align-items:flex-end;">
+                <div style="width:160px;">
+                    <ScoreBar Score="alert.Score" />
+                </div>
+                <div class="page-actions">
+                    @if (alert.ClusterId.HasValue)
+                    {
+                        <a href="/graph/@alert.ClusterId.Value" class="btn btn-violet btn-sm">Voir dans le graphe</a>
+                    }
+                    <button type="button" class="btn btn-sm" @onclick="() => ExportAsync(ReportFormat.Pdf)" disabled="@_exporting">Export PDF</button>
+                    <button type="button" class="btn btn-sm" @onclick="() => ExportAsync(ReportFormat.Json)" disabled="@_exporting">Export JSON</button>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top:10px;">
+            <div class="field-label" style="margin-bottom:6px;">Techniques MITRE ATT&amp;CK associées</div>
+            <MitreChips Techniques="alert.MitreTechniques" MaxVisible="12" />
+        </div>
+    </div>
+
+    <div class="grid-asymmetric" style="margin-bottom:18px;">
+        <div class="stack-md">
+            <div class="explain-box">
+                <div class="row-wrap" style="justify-content:space-between;margin-bottom:8px;">
+                    <h2 class="card-title">Explicabilité — Justification IA &amp; Règles</h2>
+                    @if (_detail.Events.Count > 0)
+                    {
+                        var primary = _detail.Events.OrderByDescending(e => e.Score).First();
+                        <span class="badge" style="background:var(--accent-violet-soft);color:var(--accent-violet);">
+                            @UiFormatters.AssessmentSourceLabel(primary.Source) • Confiance @((primary.Confidence * 100).ToString("0")) %
+                        </span>
+                    }
+                </div>
+                <p style="margin:0;white-space:pre-line;line-height:1.6;">@_detail.Justification</p>
+
+                @if (_detail.Cluster is { } cluster)
+                {
+                    <div class="card-elevated" style="margin-top:14px;">
+                        <div class="row-wrap" style="justify-content:space-between;margin-bottom:6px;">
+                            <strong>Cluster corrélé — Score @cluster.Score (max événement : @cluster.MaxEventScore)</strong>
+                            @if (cluster.Escalated)
+                            {
+                                <span class="badge sev-high">Escalade précoce (2ᵉ événement)</span>
+                            }
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(cluster.ChainName))
+                        {
+                            var pct = cluster.ChainTotalSteps > 0 ? Math.Min(100, (int)Math.Round(100.0 * cluster.ChainStepsMatched / cluster.ChainTotalSteps)) : 0;
+                            <div style="margin:8px 0;">
+                                <div class="row-wrap" style="justify-content:space-between;font-size:12px;margin-bottom:4px;">
+                                    <span>Chaîne d'attaque : <strong class="text-cyan">@cluster.ChainName</strong></span>
+                                    <span class="mono">@cluster.ChainStepsMatched / @cluster.ChainTotalSteps étapes (@pct %)</span>
+                                </div>
+                                <div class="score-track" style="height:8px;">
+                                    <div class="score-fill" style="width:@(pct)%;background:linear-gradient(90deg, var(--accent-violet), var(--accent-crimson));"></div>
+                                </div>
+                            </div>
+                        }
+                        <p class="text-secondary" style="margin:6px 0 0;font-size:12.5px;">@cluster.Justification</p>
+                    </div>
+                }
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Décision administrateur</h2>
+                        <p class="card-subtitle">Tout rejet comme « Faux positif » est réinjecté dans la baseline comportementale (§9.4)</p>
+                    </div>
+                </div>
+                <div class="stack-sm">
+                    <div class="field">
+                        <label class="field-label" for="decision-comment">Commentaire d'analyse (journalisé dans l'audit)</label>
+                        <textarea id="decision-comment" class="textarea" placeholder="Précisez la justification de votre décision…"
+                                  @bind="_comment" disabled="@_acting"></textarea>
+                    </div>
+                    <div class="row-wrap">
+                        <button type="button" class="btn btn-primary" disabled="@_acting" @onclick="ApproveAsync">Approuver la menace</button>
+                        <button type="button" class="btn btn-amber" disabled="@_acting" @onclick="RejectAsync">Faux positif (Rejeter)</button>
+                        <button type="button" class="btn" disabled="@_acting" @onclick="AcknowledgeAsync">Acquitter</button>
+                        <button type="button" class="btn btn-emerald" disabled="@_acting" @onclick="ResolveAsync">Marquer résolue</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Chronologie des événements corrélés (@_detail.Events.Count)</h2>
+                        <p class="card-subtitle">Cliquez sur un événement pour inspecter tous ses attributs normalisés et règles déclenchées</p>
+                    </div>
+                </div>
+
+                @if (_detail.Events.Count == 0)
+                {
+                    <EmptyState Title="Aucun événement lié" />
+                }
+                else
+                {
+                    <div class="event-timeline">
+                        @foreach (var ev in _detail.Events.OrderBy(e => e.Timestamp))
+                        {
+                            var expanded = _expandedEvents.Contains(ev.Id);
+                            <div class="timeline-item" style="--dot-color:@UiFormatters.ThreatLevelHex(ev.Level);">
+                                <div style="display:flex;justify-content:space-between;gap:12px;cursor:pointer;align-items:flex-start;"
+                                     @onclick="() => ToggleEvent(ev.Id)">
+                                    <div style="min-width:0;flex:1;">
+                                        <div class="row-wrap" style="gap:6px;margin-bottom:4px;">
+                                            <span class="mono text-muted" style="font-size:11.5px;">@UiFormatters.FormatDateTime(ev.Timestamp)</span>
+                                            <span class="badge" style="background:var(--bg-surface);border-color:var(--border-subtle);">@UiFormatters.EventCategoryLabel(ev.Category)</span>
+                                            <span class="mono text-cyan" style="font-size:12px;font-weight:700;">@ev.EventType</span>
+                                            <span class="badge" style="background:var(--accent-violet-soft);color:var(--accent-violet);font-size:10.5px;">@UiFormatters.AssessmentSourceLabel(ev.Source)</span>
+                                        </div>
+                                        <div class="mono" style="font-size:12.5px;word-break:break-all;color:var(--text-primary);">@ev.Subject</div>
+                                        <div class="text-secondary" style="font-size:12px;margin-top:4px;">@ev.Justification</div>
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+                                        <ScoreBar Score="ev.Score" />
+                                        <span class="text-muted">@(expanded ? "▲" : "▼")</span>
+                                    </div>
+                                </div>
+
+                                @if (expanded)
+                                {
+                                    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-subtle);" class="stack-sm">
+                                        @if (ev.MatchedRules.Count > 0)
+                                        {
+                                            <div>
+                                                <div class="field-label" style="margin-bottom:4px;">Règles déclenchées</div>
+                                                <div class="tag-list" style="margin-top:0;">
+                                                    @foreach (var r in ev.MatchedRules)
+                                                    {
+                                                        <span class="tag-item">@r</span>
+                                                    }
+                                                </div>
+                                            </div>
+                                        }
+                                        @if (ev.MitreTechniques.Count > 0)
+                                        {
+                                            <div>
+                                                <div class="field-label" style="margin-bottom:4px;">MITRE ATT&amp;CK</div>
+                                                <MitreChips Techniques="ev.MitreTechniques" />
+                                            </div>
+                                        }
+                                        @if (ev.Attributes.Count > 0)
+                                        {
+                                            <div>
+                                                <div class="field-label" style="margin-bottom:6px;">Attributs normalisés</div>
+                                                <div class="table-scroll">
+                                                    <table class="soc-table">
+                                                        <tbody>
+                                                            @foreach (var kv in ev.Attributes.OrderBy(k => k.Key))
+                                                            {
+                                                                <tr>
+                                                                    <td class="mono text-cyan" style="width:200px;font-size:12px;">@kv.Key</td>
+                                                                    <td class="mono" style="font-size:12px;word-break:break-all;">@kv.Value</td>
+                                                                </tr>
+                                                            }
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="stack-md">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Actions &amp; blocages liés (@_detail.Actions.Count)</h2>
+                        <p class="card-subtitle">Réversibilité garantie en 1 clic (F7)</p>
+                    </div>
+                </div>
+
+                @if (_detail.Actions.Count == 0)
+                {
+                    <EmptyState Title="Aucune action de réponse"
+                                Subtitle="Aucune mesure de blocage ou de proposition n'a été générée pour cette alerte." />
+                }
+                else
+                {
+                    <div class="stack-sm">
+                        @foreach (var ticket in _detail.Actions)
+                        {
+                            <div class="card-elevated stack-sm">
+                                <div class="row-wrap" style="justify-content:space-between;">
+                                    <strong style="font-size:13.5px;">@UiFormatters.ResponseActionLabel(ticket.Type)</strong>
+                                    <span class="badge @UiFormatters.ActionStatusCss(ticket.Status)">@UiFormatters.ActionStatusLabel(ticket.Status)</span>
+                                </div>
+                                <div class="mono text-cyan" style="font-size:12px;word-break:break-all;">@ticket.Target</div>
+                                <div class="text-secondary" style="font-size:12px;">@ticket.Rationale</div>
+                                <div class="text-muted" style="font-size:11px;">
+                                    @(ticket.Automatic ? "Automatique" : "Manuelle") • @UiFormatters.FormatShortDateTime(ticket.CreatedAt)
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(ticket.ResultMessage))
+                                {
+                                    <div class="mono" style="font-size:11.5px;color:var(--text-secondary);">Résultat : @ticket.ResultMessage</div>
+                                }
+                                <div class="row-wrap" style="gap:6px;margin-top:4px;">
+                                    @if (ticket.Status == ActionStatus.Proposed)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-primary" disabled="@_acting" @onclick="() => ApproveTicketAsync(ticket.Id)">Exécuter / Approuver</button>
+                                        <button type="button" class="btn btn-sm btn-ghost" disabled="@_acting" @onclick="() => RejectTicketAsync(ticket.Id)">Rejeter</button>
+                                    }
+                                    @if (ticket.Reversible && ticket.Status is ActionStatus.Executed or ActionStatus.Pending)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-emerald" disabled="@_acting" @onclick="() => RevertTicketAsync(ticket.Id)">
+                                            ↩ Annuler le blocage
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Historique des décisions</h2>
+                </div>
+                @if (_detail.History.Count == 0)
+                {
+                    <p class="text-muted" style="margin:0;font-size:13px;">Aucune décision enregistrée pour l'instant.</p>
+                }
+                else
+                {
+                    <div class="stack-sm">
+                        @foreach (var h in _detail.History.OrderByDescending(x => x.Timestamp))
+                        {
+                            <div class="card-elevated" style="padding:10px 12px;">
+                                <div class="row-wrap" style="justify-content:space-between;font-size:12px;">
+                                    <strong>@h.Action</strong>
+                                    <span class="mono text-muted">@UiFormatters.FormatShortDateTime(h.Timestamp)</span>
+                                </div>
+                                <div class="text-secondary" style="font-size:12px;">Par <span class="mono">@h.Actor</span></div>
+                                @if (!string.IsNullOrWhiteSpace(h.Comment))
+                                {
+                                    <div style="font-size:12px;margin-top:4px;">« @h.Comment »</div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private AlertDetailDto? _detail;
+    private readonly HashSet<Guid> _expandedEvents = new();
+    private string _comment = string.Empty;
+    private bool _loading = true;
+    private bool _acting;
+    private bool _exporting;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Hub.AlertUpdated += OnLiveAlertUpdated;
+        Hub.ActionUpdated += OnLiveActionUpdated;
+        await LoadAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_detail is not null && _detail.Alert.Id != Id)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _detail = await Api.GetAlertDetailAsync(Id);
+        }
+        catch (SentinelApiException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void ToggleEvent(Guid eventId)
+    {
+        if (!_expandedEvents.Add(eventId)) _expandedEvents.Remove(eventId);
+    }
+
+    private async Task ApproveAsync() => await RunDecisionAsync(
+        () => Api.ApproveAlertAsync(Id, NullIfEmpty(_comment)),
+        "Alerte approuvée", "La menace a été confirmée et les actions proposées validées.");
+
+    private async Task RejectAsync() => await RunDecisionAsync(
+        () => Api.RejectAlertAsync(Id, NullIfEmpty(_comment)),
+        "Faux positif enregistré", "Ce retour est réinjecté dans la baseline pour réduire les faux positifs.");
+
+    private async Task AcknowledgeAsync() => await RunDecisionAsync(
+        () => Api.AcknowledgeAlertAsync(Id, NullIfEmpty(_comment)),
+        "Alerte acquittée", "L'alerte est marquée prise en charge.");
+
+    private async Task ResolveAsync() => await RunDecisionAsync(
+        () => Api.ResolveAlertAsync(Id, NullIfEmpty(_comment)),
+        "Alerte résolue", "L'incident est clôturé.");
+
+    private async Task RunDecisionAsync(Func<Task<AlertDto>> call, string title, string msg)
+    {
+        _acting = true;
+        try
+        {
+            await call();
+            _comment = string.Empty;
+            Toasts.Success(title, msg);
+            await LoadAsync();
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Danger("Action impossible", ex.Message);
+        }
+        finally
+        {
+            _acting = false;
+        }
+    }
+
+    private async Task ApproveTicketAsync(Guid ticketId)
+    {
+        _acting = true;
+        try
+        {
+            await Api.ApproveActionAsync(ticketId);
+            Toasts.Success("Action approuvée", "Ordre d'exécution transmis à l'agent.");
+            await LoadAsync();
+        }
+        catch (SentinelApiException ex) { Toasts.Danger("Erreur", ex.Message); }
+        finally { _acting = false; }
+    }
+
+    private async Task RejectTicketAsync(Guid ticketId)
+    {
+        _acting = true;
+        try
+        {
+            await Api.RejectActionAsync(ticketId);
+            Toasts.Info("Proposition rejetée", "L'action ne sera pas exécutée.");
+            await LoadAsync();
+        }
+        catch (SentinelApiException ex) { Toasts.Danger("Erreur", ex.Message); }
+        finally { _acting = false; }
+    }
+
+    private async Task RevertTicketAsync(Guid ticketId)
+    {
+        _acting = true;
+        try
+        {
+            await Api.RevertActionAsync(ticketId);
+            Toasts.Success("Annulation lancée", "Demande de restauration de l'état initial envoyée (F7).");
+            await LoadAsync();
+        }
+        catch (SentinelApiException ex) { Toasts.Danger("Erreur", ex.Message); }
+        finally { _acting = false; }
+    }
+
+    private async Task ExportAsync(ReportFormat format)
+    {
+        _exporting = true;
+        try
+        {
+            var file = await Api.DownloadAlertReportAsync(Id, format);
+            await JS.InvokeVoidAsync("sentinelUtils.downloadBase64File",
+                file.FileName, file.ContentType, Convert.ToBase64String(file.Content));
+            Toasts.Success("Rapport exporté", $"Fichier {file.FileName} téléchargé.");
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Danger("Export impossible", ex.Message);
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    private void OnLiveAlertUpdated(AlertDto a)
+    {
+        if (a.Id == Id) _ = InvokeAsync(LoadAsync);
+    }
+
+    private void OnLiveActionUpdated(ActionTicketDto t)
+    {
+        if (t.AlertId == Id) _ = InvokeAsync(LoadAsync);
+    }
+
+    private static string? NullIfEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    public void Dispose()
+    {
+        Hub.AlertUpdated -= OnLiveAlertUpdated;
+        Hub.ActionUpdated -= OnLiveActionUpdated;
+    }
+}

@@ -1,0 +1,13 @@
+<div class="score-wrap" title="Score de menace : @ClampedScore / 100">
+    <span class="score-num" style="color:@ColorHex;">@ClampedScore</span>
+    <div class="score-track">
+        <div class="score-fill" style="width:@(ClampedScore)%;background:@ColorHex;"></div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int Score { get; set; }
+
+    private int ClampedScore => Math.Clamp(Score, 0, 100);
+    private string ColorHex => UiFormatters.ScoreColorHex(ClampedScore);
+}

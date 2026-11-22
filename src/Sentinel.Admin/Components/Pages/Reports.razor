@@ -1,0 +1,289 @@
+@page "/reports"
+@inject SentinelApiClient Api
+@inject ThemeService Theme
+@inject ToastService Toasts
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Rapports &amp; Évaluation — SENTINEL</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Rapports &amp; Évaluation scientifique</h1>
+        <p class="page-subtitle">Export certifié PDF/JSON des décisions (F10) et mesure du gain Time-To-Detect (§8.4, §14.3)</p>
+    </div>
+    <div class="page-actions">
+        <button type="button" class="btn" @onclick="LoadEvaluationAsync" disabled="@_loadingEval">
+            @(_loadingEval ? "Chargement…" : "Actualiser les métriques")
+        </button>
+    </div>
+</div>
+
+<ErrorBanner Message="@_error" OnRetry="LoadEvaluationAsync" />
+
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header">
+        <div>
+            <h2 class="card-title">Générateur de rapport d'activité et de conformité</h2>
+            <p class="card-subtitle">Inclut la synthèse du score, les alertes, les techniques MITRE ATT&amp;CK et la justification de chaque décision</p>
+        </div>
+        <div class="segmented">
+            <button type="button" class="@(_preset == "24h" ? "active" : "")" @onclick='() => ApplyPreset("24h")'>24 h</button>
+            <button type="button" class="@(_preset == "7d" ? "active" : "")" @onclick='() => ApplyPreset("7d")'>7 j</button>
+            <button type="button" class="@(_preset == "30d" ? "active" : "")" @onclick='() => ApplyPreset("30d")'>30 j</button>
+        </div>
+    </div>
+
+    <div class="grid-3" style="margin-bottom:16px;">
+        <div class="field">
+            <label class="field-label">Du</label>
+            <input type="date" class="input mono" @bind="_fromDate" />
+        </div>
+        <div class="field">
+            <label class="field-label">Au</label>
+            <input type="date" class="input mono" @bind="_toDate" />
+        </div>
+        <div class="field">
+            <label class="field-label">Poste (optionnel)</label>
+            <select class="select" @bind="_hostFilter">
+                <option value="">Tous les postes du parc</option>
+                @foreach (var h in _hosts)
+                {
+                    <option value="@h.HostId">@h.MachineName (@h.HostId)</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    <div class="row-wrap" style="justify-content:space-between;">
+        <div class="segmented">
+            <button type="button" class="@(_format == ReportFormat.Pdf ? "active" : "")" @onclick="() => _format = ReportFormat.Pdf">Format PDF (QuestPDF)</button>
+            <button type="button" class="@(_format == ReportFormat.Json ? "active" : "")" @onclick="() => _format = ReportFormat.Json">Format JSON structuré</button>
+        </div>
+
+        <button type="button" class="btn btn-primary btn-lg" @onclick="GenerateReportAsync" disabled="@_generating">
+            @(_generating ? "Génération du fichier…" : $"Télécharger le rapport {(_format == ReportFormat.Pdf ? "PDF" : "JSON")}")
+        </button>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div>
+            <h2 class="card-title">Évaluation scientifique — Time-To-Detect (Configurations A vs B vs C)</h2>
+            <p class="card-subtitle">
+                Comparaison : <strong>(A)</strong> Règles seules • <strong>(B)</strong> Règles + IA locale • <strong>(C)</strong> Règles + IA + Moteur de corrélation
+            </p>
+        </div>
+    </div>
+
+    @if (_loadingEval && _metrics.Count == 0)
+    {
+        <SkeletonCards Count="3" />
+    }
+    else if (_metrics.Count == 0)
+    {
+        <EmptyState Title="Aucun résultat de simulation disponible"
+                    Subtitle="Exécutez les scénarios de tests dans tests/Sentinel.Simulation pour comparer le Time-To-Detect entre les configurations A, B et C." />
+    }
+    else
+    {
+        <div class="grid-2" style="margin-bottom:20px;">
+            <div class="card-elevated">
+                <div class="field-label" style="margin-bottom:8px;">Nombre d'événements avant alerte (plus bas = détection plus précoce)</div>
+                <div class="chart-box-sm">
+                    <canvas id="eval-events-chart"></canvas>
+                </div>
+            </div>
+            <div class="card-elevated">
+                <div class="field-label" style="margin-bottom:8px;">Délai de détection Time-To-Detect en secondes (plus bas = meilleur)</div>
+                <div class="chart-box-sm">
+                    <canvas id="eval-ttd-chart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-scroll">
+            <table class="soc-table">
+                <thead>
+                    <tr>
+                        <th>Scénario d'attaque</th>
+                        <th>Configuration</th>
+                        <th>Détecté</th>
+                        <th>Évts avant alerte</th>
+                        <th>TTD (s)</th>
+                        <th>Score max</th>
+                        <th>Faux positifs</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var m in _metrics.OrderBy(x => x.Scenario).ThenBy(x => x.Configuration))
+                    {
+                        <tr>
+                            <td><strong>@m.Scenario</strong></td>
+                            <td>
+                                <span class="badge @ConfigBadgeCss(m.Configuration)">@m.Configuration</span>
+                            </td>
+                            <td>
+                                <span class="badge @(m.Detected ? "act-reverted" : "sev-critical")">
+                                    @(m.Detected ? "Oui" : "Non")
+                                </span>
+                            </td>
+                            <td class="mono" style="font-weight:700;">@m.EventsBeforeAlert</td>
+                            <td class="mono" style="font-weight:700;">@m.SecondsToDetect.ToString("0.00") s</td>
+                            <td><ScoreBar Score="m.PeakScore" /></td>
+                            <td class="mono @(m.FalsePositives > 0 ? "text-amber" : "text-emerald")">@m.FalsePositives</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<HostDto> _hosts = Array.Empty<HostDto>();
+    private IReadOnlyList<ScenarioMetricDto> _metrics = Array.Empty<ScenarioMetricDto>();
+
+    private string _preset = "7d";
+    private DateOnly _fromDate = DateOnly.FromDateTime(DateTime.Today.AddDays(-7));
+    private DateOnly _toDate = DateOnly.FromDateTime(DateTime.Today);
+    private string _hostFilter = string.Empty;
+    private ReportFormat _format = ReportFormat.Pdf;
+
+    private bool _generating;
+    private bool _loadingEval = true;
+    private bool _chartsDirty;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Theme.ThemeChanged += OnThemeChanged;
+        try { _hosts = await Api.GetHostsAsync(); } catch { }
+        await LoadEvaluationAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_chartsDirty && _metrics.Count > 0)
+        {
+            _chartsDirty = false;
+            await RenderEvalChartsAsync();
+        }
+    }
+
+    private void ApplyPreset(string preset)
+    {
+        _preset = preset;
+        _toDate = DateOnly.FromDateTime(DateTime.Today);
+        _fromDate = preset switch
+        {
+            "24h" => DateOnly.FromDateTime(DateTime.Today.AddDays(-1)),
+            "30d" => DateOnly.FromDateTime(DateTime.Today.AddDays(-30)),
+            _ => DateOnly.FromDateTime(DateTime.Today.AddDays(-7))
+        };
+    }
+
+    private async Task GenerateReportAsync()
+    {
+        _generating = true;
+        _error = null;
+        try
+        {
+            var from = new DateTimeOffset(_fromDate.ToDateTime(TimeOnly.MinValue), TimeZoneInfo.Local.GetUtcOffset(DateTime.Now));
+            var to = new DateTimeOffset(_toDate.ToDateTime(new TimeOnly(23, 59, 59)), TimeZoneInfo.Local.GetUtcOffset(DateTime.Now));
+            if (to < from) (from, to) = (to, from);
+
+            var file = await Api.DownloadReportAsync(
+                from, to, _format,
+                string.IsNullOrWhiteSpace(_hostFilter) ? null : _hostFilter);
+
+            await JS.InvokeVoidAsync("sentinelUtils.downloadBase64File",
+                file.FileName, file.ContentType, Convert.ToBase64String(file.Content));
+
+            Toasts.Success("Rapport téléchargé", $"{file.FileName} ({file.Content.Length / 1024.0:0.0} Ko)");
+        }
+        catch (SentinelApiException ex)
+        {
+            _error = ex.Message;
+            Toasts.Danger("Génération échouée", ex.Message);
+        }
+        finally
+        {
+            _generating = false;
+        }
+    }
+
+    private async Task LoadEvaluationAsync()
+    {
+        _loadingEval = true;
+        _error = null;
+        try
+        {
+            _metrics = await Api.GetEvaluationAsync();
+            _chartsDirty = _metrics.Count > 0;
+        }
+        catch (SentinelApiException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loadingEval = false;
+        }
+    }
+
+    private async Task RenderEvalChartsAsync()
+    {
+        try
+        {
+            var scenarios = _metrics.Select(m => m.Scenario).Distinct().OrderBy(s => s).ToArray();
+            var configs = _metrics.Select(m => m.Configuration).Distinct().OrderBy(c => c).ToArray();
+            var palette = new[] { "#64748b", "#06b6d4", "#10b981", "#8b5cf6", "#f59e0b" };
+
+            var eventsDatasets = configs.Select((cfg, i) => new
+            {
+                label = cfg,
+                color = palette[i % palette.Length],
+                data = scenarios.Select(sc => _metrics.FirstOrDefault(m => m.Scenario == sc && m.Configuration == cfg)?.EventsBeforeAlert ?? 0).ToArray()
+            }).ToArray();
+
+            var ttdDatasets = configs.Select((cfg, i) => new
+            {
+                label = cfg,
+                color = palette[i % palette.Length],
+                data = scenarios.Select(sc => Math.Round(_metrics.FirstOrDefault(m => m.Scenario == sc && m.Configuration == cfg)?.SecondsToDetect ?? 0, 2)).ToArray()
+            }).ToArray();
+
+            await JS.InvokeVoidAsync("sentinelCharts.renderEvaluationChart", "eval-events-chart", scenarios, eventsDatasets, "Événements");
+            await JS.InvokeVoidAsync("sentinelCharts.renderEvaluationChart", "eval-ttd-chart", scenarios, ttdDatasets, "Secondes");
+        }
+        catch { }
+    }
+
+    private static string ConfigBadgeCss(string cfg)
+    {
+        if (cfg.StartsWith("C", StringComparison.OrdinalIgnoreCase) || cfg.Contains("Corr", StringComparison.OrdinalIgnoreCase))
+            return "act-reverted";
+        if (cfg.StartsWith("B", StringComparison.OrdinalIgnoreCase) || cfg.Contains("IA", StringComparison.OrdinalIgnoreCase))
+            return "sev-low";
+        return "status-fp";
+    }
+
+    private void OnThemeChanged(string theme)
+    {
+        _chartsDirty = _metrics.Count > 0;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Theme.ThemeChanged -= OnThemeChanged;
+        try
+        {
+            await JS.InvokeVoidAsync("sentinelCharts.destroyChart", "eval-events-chart");
+            await JS.InvokeVoidAsync("sentinelCharts.destroyChart", "eval-ttd-chart");
+        }
+        catch { }
+    }
+}

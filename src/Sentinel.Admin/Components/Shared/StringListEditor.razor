@@ -1,0 +1,72 @@
+<div class="field">
+    <label class="field-label">@Label</label>
+    <div style="display:flex;gap:8px;">
+        <input class="input @(Monospace ? "mono" : "")"
+               placeholder="@Placeholder"
+               @bind="_draft"
+               @bind:event="oninput"
+               @onkeydown="OnKeyDown" />
+        <button type="button" class="btn btn-primary btn-sm" @onclick="AddAsync" disabled="@string.IsNullOrWhiteSpace(_draft)">
+            Ajouter
+        </button>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(Hint))
+    {
+        <span class="field-hint">@Hint</span>
+    }
+    <div class="tag-list">
+        @if (Items.Count == 0)
+        {
+            <span class="text-muted" style="font-size:12px;">Aucune entrée configurée.</span>
+        }
+        else
+        {
+            @foreach (var item in Items)
+            {
+                <span class="tag-item">
+                    <span>@item</span>
+                    <button type="button" class="tag-remove" title="Supprimer" @onclick="() => RemoveAsync(item)">×</button>
+                </span>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Placeholder { get; set; } = "Nouvelle valeur…";
+    [Parameter] public string? Hint { get; set; }
+    [Parameter] public bool Monospace { get; set; } = true;
+    [Parameter] public List<string> Items { get; set; } = new();
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private string _draft = string.Empty;
+
+    private async Task AddAsync()
+    {
+        var value = _draft.Trim();
+        if (string.IsNullOrWhiteSpace(value)) return;
+        if (!Items.Contains(value, StringComparer.OrdinalIgnoreCase))
+        {
+            Items.Add(value);
+            await OnChanged.InvokeAsync();
+        }
+        _draft = string.Empty;
+    }
+
+    private async Task RemoveAsync(string item)
+    {
+        if (Items.Remove(item))
+        {
+            await OnChanged.InvokeAsync();
+        }
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await AddAsync();
+        }
+    }
+}

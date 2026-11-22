@@ -1,0 +1,468 @@
+@page "/"
+@inject SentinelApiClient Api
+@inject LiveHubClient Hub
+@inject ThemeService Theme
+@inject ToastService Toasts
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Vue d'ensemble — SENTINEL</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Vue d'ensemble SOC</h1>
+        <p class="page-subtitle">
+            Supervision temps réel, détection des signaux faibles et corrélation de chaînes d'attaque
+            @if (_summary is not null)
+            {
+                <span>• Mis à jour @UiFormatters.RelativeTime(_summary.GeneratedAt)</span>
+            }
+        </p>
+    </div>
+    <div class="page-actions">
+        <a href="/graph" class="btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" /></svg>
+            <span>Graphe</span>
+        </a>
+        <a href="/reports" class="btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+            <span>Exporter rapport</span>
+        </a>
+        <button type="button" class="btn btn-primary" @onclick="LoadAllAsync" disabled="@_loading">
+            @(_loading ? "Actualisation…" : "Actualiser")
+        </button>
+    </div>
+</div>
+
+<ErrorBanner Message="@_error" OnRetry="LoadAllAsync" />
+
+@if (_loading && _summary is null)
+{
+    <SkeletonCards Count="6" />
+}
+else if (_summary is not null)
+{
+    <div class="grid-hero">
+        <SecurityGauge Score="@_summary.GlobalSecurityScore"
+                       FooterText="@($"Mode {UiFormatters.OperatingModeLabel(_summary.Mode)} • {_summary.HostsOnline}/{_summary.HostsTotal} poste(s) en ligne")" />
+
+        <div class="kpi-grid">
+            <button type="button" class="kpi-card clickable" style="--kpi-accent:var(--accent-crimson);" @onclick='() => Nav.NavigateTo("/alerts")'>
+                <div class="kpi-label">
+                    <span>Alertes actives</span>
+                    @if (_summary.CriticalAlerts > 0)
+                    {
+                        <span class="badge sev-critical"><span class="badge-dot"></span>@_summary.CriticalAlerts critique(s)</span>
+                    }
+                </div>
+                <div class="kpi-value @(_summary.ActiveAlerts > 0 ? "text-crimson" : "text-emerald")">@_summary.ActiveAlerts</div>
+                <div class="kpi-meta">Alertes non résolues sur le parc</div>
+            </button>
+
+            <button type="button" class="kpi-card clickable" style="--kpi-accent:var(--accent-amber);" @onclick='() => Nav.NavigateTo("/alerts?status=Open")'>
+                <div class="kpi-label">
+                    <span>En attente de décision</span>
+                    <span class="badge sev-moderate">Niv. 3</span>
+                </div>
+                <div class="kpi-value @(_summary.AlertsAwaitingDecision > 0 ? "text-amber" : "")">@_summary.AlertsAwaitingDecision</div>
+                <div class="kpi-meta">Validation humaine requise</div>
+            </button>
+
+            <button type="button" class="kpi-card clickable" style="--kpi-accent:var(--accent-orange);" @onclick='() => Nav.NavigateTo("/actions")'>
+                <div class="kpi-label">
+                    <span>Blocages actifs</span>
+                    <span class="text-muted" style="font-size:11px;">Réversibles</span>
+                </div>
+                <div class="kpi-value">@_summary.ActiveBlocks</div>
+                <div class="kpi-meta">Annulables en 1 clic (F7)</div>
+            </button>
+
+            <button type="button" class="kpi-card clickable" style="--kpi-accent:var(--accent-violet);" @onclick='() => Nav.NavigateTo("/graph")'>
+                <div class="kpi-label">
+                    <span>Événements (24 h)</span>
+                    <span class="badge" style="background:var(--accent-violet-soft);color:var(--accent-violet);">@_summary.ClustersLast24h clusters</span>
+                </div>
+                <div class="kpi-value">@_summary.EventsLast24h.ToString("N0", CultureInfo.GetCultureInfo("fr-FR"))</div>
+                <div class="kpi-meta">Groupes corrélés identifiés</div>
+            </button>
+
+            <button type="button" class="kpi-card clickable" style="--kpi-accent:var(--accent-emerald);" @onclick='() => Nav.NavigateTo("/entities")'>
+                <div class="kpi-label">
+                    <span>Postes surveillés</span>
+                    <span class="pulse-dot @(_summary.HostsOnline > 0 ? "online" : "offline")"></span>
+                </div>
+                <div class="kpi-value">@_summary.HostsOnline <span class="text-muted" style="font-size:16px;font-weight:600;">/ @_summary.HostsTotal</span></div>
+                <div class="kpi-meta">Agents Windows actifs</div>
+            </button>
+
+            <button type="button" class="kpi-card clickable" style="--kpi-accent:var(--accent-cyan);" @onclick='() => Nav.NavigateTo("/settings")'>
+                <div class="kpi-label">
+                    <span>IA locale (Ollama)</span>
+                    <span class="badge @(_summary.LlmAvailable ? "sev-low" : "status-fp")">@(_summary.LlmAvailable ? "En ligne" : "Repli règles")</span>
+                </div>
+                <div class="kpi-value" style="font-size:18px;padding-top:4px;">@(_summary.LlmModel)</div>
+                <div class="kpi-meta">
+                    @if (_health is not null)
+                    {
+                        <span>Latence moy. <strong class="mono">@_health.LlmAvgLatencyMs.ToString("0") ms</strong> • Usage <strong class="mono">@((_health.LlmUsageRatio * 100).ToString("0.0"))%</strong></span>
+                    }
+                    else
+                    {
+                        <span>Scoring contextuel 100 % local</span>
+                    }
+                </div>
+            </button>
+        </div>
+    </div>
+
+    <div class="card" style="margin-bottom:18px;">
+        <div class="card-header">
+            <div>
+                <h2 class="card-title">Évolution des menaces et de l'activité</h2>
+                <p class="card-subtitle">Corrélation entre volume d'événements, alertes déclenchées et score maximal observé</p>
+            </div>
+            <div class="segmented" role="tablist" aria-label="Période de la courbe">
+                <button type="button" class="@(_range == "24h" ? "active" : "")" @onclick='() => ChangeRangeAsync("24h")'>24 h</button>
+                <button type="button" class="@(_range == "7d" ? "active" : "")" @onclick='() => ChangeRangeAsync("7d")'>7 j</button>
+                <button type="button" class="@(_range == "30d" ? "active" : "")" @onclick='() => ChangeRangeAsync("30d")'>30 j</button>
+            </div>
+        </div>
+        <div class="chart-box">
+            <canvas id="dash-timeline-chart"></canvas>
+        </div>
+    </div>
+
+    <div class="grid-3" style="margin-bottom:18px;">
+        <div class="card">
+            <div class="card-header">
+                <div>
+                    <h3 class="card-title">Répartition par niveau (24 h)</h3>
+                    <p class="card-subtitle">Gradation 0–100 (Info → Critique)</p>
+                </div>
+            </div>
+            <div class="chart-box-sm">
+                <canvas id="dash-level-chart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div>
+                    <h3 class="card-title">Types de menaces (24 h)</h3>
+                    <p class="card-subtitle">Classification IA & règles</p>
+                </div>
+            </div>
+            <div class="chart-box-sm">
+                <canvas id="dash-type-chart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div>
+                    <h3 class="card-title">Canaux de collecte (24 h)</h3>
+                    <p class="card-subtitle">Périmètre fermé (§2.1)</p>
+                </div>
+            </div>
+            <div class="chart-box-sm">
+                <canvas id="dash-cat-chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid-asymmetric">
+        <div class="card">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">Flux d'alertes récentes</h2>
+                    <p class="card-subtitle">Mise à jour automatique via SignalR</p>
+                </div>
+                <a href="/alerts" class="btn btn-sm">Voir toutes les alertes →</a>
+            </div>
+
+            @if (_recentAlerts.Count == 0)
+            {
+                <EmptyState Title="Aucune alerte récente"
+                            Subtitle="Tous les postes surveillés présentent une activité conforme à la baseline." />
+            }
+            else
+            {
+                <div class="stack-sm">
+                    @foreach (var alert in _recentAlerts.Take(8))
+                    {
+                        <div class="alert-row-item" @onclick='() => Nav.NavigateTo($"/alerts/{alert.Id}")'>
+                            <div style="flex:1;min-width:0;">
+                                <div class="row-wrap" style="gap:8px;margin-bottom:4px;">
+                                    <SeverityBadge Level="alert.Level" />
+                                    <span class="badge @UiFormatters.AlertStatusCss(alert.Status)">@UiFormatters.AlertStatusLabel(alert.Status)</span>
+                                    <span class="mono text-muted" style="font-size:11.5px;">@alert.HostId</span>
+                                    <span class="text-muted" style="font-size:11.5px;">• @UiFormatters.RelativeTime(alert.CreatedAt)</span>
+                                </div>
+                                <div style="font-weight:700;font-size:13.5px;color:var(--text-primary);" class="truncate">@alert.Title</div>
+                                <div class="text-secondary truncate" style="font-size:12px;">@alert.Summary</div>
+                                <div style="margin-top:6px;">
+                                    <MitreChips Techniques="alert.MitreTechniques" MaxVisible="4" />
+                                </div>
+                            </div>
+                            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex-shrink:0;" @onclick:stopPropagation="true">
+                                <ScoreBar Score="alert.Score" />
+                                @if (alert.Status == AlertStatus.Open)
+                                {
+                                    <div class="row-wrap" style="gap:6px;">
+                                        <button type="button" class="btn btn-sm btn-emerald" @onclick="() => QuickAckAsync(alert)">Acquitter</button>
+                                        <button type="button" class="btn btn-sm btn-primary" @onclick='() => Nav.NavigateTo($"/alerts/{alert.Id}")'>Examiner</button>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">Santé & activité système</h2>
+                    <p class="card-subtitle">Télémétrie du cœur Sentinel.Server</p>
+                </div>
+            </div>
+
+            @if (_health is not null)
+            {
+                <div class="stack-sm">
+                    <div class="card-elevated" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="text-secondary">Mode de décision</span>
+                        <span class="status-chip @UiFormatters.OperatingModeCss(_health.Mode)">@UiFormatters.OperatingModeLabel(_health.Mode)</span>
+                    </div>
+                    <div class="card-elevated" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="text-secondary">Base de données SQLite</span>
+                        <span class="badge @(_health.DatabaseOk ? "act-reverted" : "sev-critical")">@(_health.DatabaseOk ? "Opérationnelle" : "Anomalie")</span>
+                    </div>
+                    <div class="card-elevated" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="text-secondary">Agents connectés (gRPC mTLS)</span>
+                        <strong class="mono">@_health.AgentsConnected</strong>
+                    </div>
+                    <div class="card-elevated" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="text-secondary">Événements traités (total)</span>
+                        <strong class="mono">@_health.EventsProcessed.ToString("N0", CultureInfo.GetCultureInfo("fr-FR"))</strong>
+                    </div>
+                    <div class="card-elevated" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="text-secondary">Latence moyenne pipeline</span>
+                        <strong class="mono">@_health.AvgPipelineLatencyMs.ToString("0.0") ms</strong>
+                    </div>
+                    <div class="card-elevated" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="text-secondary">Ratio d'appels IA locale</span>
+                        <strong class="mono">@((_health.LlmUsageRatio * 100).ToString("0.0")) %</strong>
+                    </div>
+                    <div class="card-elevated" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="text-secondary">Mémoire serveur (RAM)</span>
+                        <strong class="mono">@_health.ProcessWorkingSetMb Mo</strong>
+                    </div>
+                    <div class="card-elevated" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="text-secondary">Démarré le</span>
+                        <span class="mono" style="font-size:12px;">@UiFormatters.FormatShortDateTime(_health.StartedAt)</span>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <EmptyState Title="Télémétrie indisponible" Subtitle="Impossible de récupérer les métriques système pour le moment." />
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private DashboardSummaryDto? _summary;
+    private SystemHealthDto? _health;
+    private IReadOnlyList<TimeSeriesPointDto> _timeline = Array.Empty<TimeSeriesPointDto>();
+    private List<AlertDto> _recentAlerts = new();
+    private string _range = "24h";
+    private bool _loading = true;
+    private bool _chartsDirty;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Hub.SummaryChanged += OnSummaryChanged;
+        Hub.AlertRaised += OnAlertRaised;
+        Hub.AlertUpdated += OnAlertUpdated;
+        Theme.ThemeChanged += OnThemeChanged;
+        await LoadAllAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_chartsDirty && _summary is not null)
+        {
+            _chartsDirty = false;
+            await RenderChartsAsync();
+        }
+    }
+
+    private async Task LoadAllAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var summaryTask = Api.GetDashboardSummaryAsync();
+            var timelineTask = Api.GetTimelineAsync(_range);
+            var healthTask = Api.GetHealthAsync();
+
+            await Task.WhenAll(summaryTask, timelineTask, healthTask);
+
+            _summary = summaryTask.Result;
+            _timeline = timelineTask.Result;
+            _health = healthTask.Result;
+            _recentAlerts = _summary.RecentAlerts.ToList();
+            _chartsDirty = true;
+        }
+        catch (SentinelApiException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ChangeRangeAsync(string range)
+    {
+        if (_range == range) return;
+        _range = range;
+        try
+        {
+            _timeline = await Api.GetTimelineAsync(_range);
+            _chartsDirty = true;
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Danger("Erreur", ex.Message);
+        }
+    }
+
+    private async Task QuickAckAsync(AlertDto alert)
+    {
+        try
+        {
+            var updated = await Api.AcknowledgeAlertAsync(alert.Id, "Acquittée depuis la vue d'ensemble.");
+            ReplaceAlert(updated);
+            Toasts.Success("Alerte acquittée", updated.Title);
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Danger("Erreur", ex.Message);
+        }
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        if (_summary is null) return;
+        try
+        {
+            var labels = _timeline.Select(p => _range == "24h"
+                ? p.Timestamp.ToLocalTime().ToString("HH:mm")
+                : p.Timestamp.ToLocalTime().ToString("dd/MM HH:mm")).ToArray();
+            var eventsData = _timeline.Select(p => p.Events).ToArray();
+            var alertsData = _timeline.Select(p => p.Alerts).ToArray();
+            var maxScoreData = _timeline.Select(p => p.MaxScore).ToArray();
+
+            await JS.InvokeVoidAsync("sentinelCharts.renderTimelineChart",
+                "dash-timeline-chart", labels, eventsData, alertsData, maxScoreData);
+
+            var levelEntries = Enum.GetValues<ThreatLevel>()
+                .Select(l => (Level: l, Count: _summary.LevelDistribution24h.TryGetValue(l, out var c) ? c : 0))
+                .Where(x => x.Count > 0)
+                .ToList();
+            if (levelEntries.Count == 0)
+            {
+                levelEntries.Add((ThreatLevel.Info, 0));
+            }
+            await JS.InvokeVoidAsync("sentinelCharts.renderDoughnutChart",
+                "dash-level-chart",
+                levelEntries.Select(x => UiFormatters.ThreatLevelLabel(x.Level)).ToArray(),
+                levelEntries.Select(x => x.Count).ToArray(),
+                levelEntries.Select(x => UiFormatters.ThreatLevelHex(x.Level)).ToArray());
+
+            var typeEntries = _summary.ThreatTypes24h
+                .Where(kv => kv.Key != ThreatType.None && kv.Value > 0)
+                .OrderByDescending(kv => kv.Value)
+                .Take(7)
+                .ToList();
+            await JS.InvokeVoidAsync("sentinelCharts.renderHorizontalBarChart",
+                "dash-type-chart",
+                typeEntries.Select(kv => UiFormatters.ThreatTypeLabel(kv.Key)).ToArray(),
+                typeEntries.Select(kv => kv.Value).ToArray(),
+                typeEntries.Select(kv => UiFormatters.ThreatTypeHex(kv.Key)).ToArray());
+
+            var catEntries = _summary.Categories24h
+                .Where(kv => kv.Value > 0)
+                .OrderByDescending(kv => kv.Value)
+                .Take(8)
+                .ToList();
+            await JS.InvokeVoidAsync("sentinelCharts.renderHorizontalBarChart",
+                "dash-cat-chart",
+                catEntries.Select(kv => UiFormatters.EventCategoryLabel(kv.Key)).ToArray(),
+                catEntries.Select(kv => kv.Value).ToArray(),
+                catEntries.Select(_ => "#06b6d4").ToArray());
+        }
+        catch
+        {
+            // Ignoré si le composant a été démonté pendant l'appel JS
+        }
+    }
+
+    private void OnSummaryChanged(DashboardSummaryDto summary)
+    {
+        _summary = summary;
+        _recentAlerts = summary.RecentAlerts.ToList();
+        _chartsDirty = true;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnAlertRaised(AlertDto alert)
+    {
+        _recentAlerts.RemoveAll(a => a.Id == alert.Id);
+        _recentAlerts.Insert(0, alert);
+        if (_recentAlerts.Count > 12) _recentAlerts.RemoveAt(_recentAlerts.Count - 1);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnAlertUpdated(AlertDto alert)
+    {
+        ReplaceAlert(alert);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void ReplaceAlert(AlertDto alert)
+    {
+        var idx = _recentAlerts.FindIndex(a => a.Id == alert.Id);
+        if (idx >= 0) _recentAlerts[idx] = alert;
+    }
+
+    private void OnThemeChanged(string theme)
+    {
+        _chartsDirty = true;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Hub.SummaryChanged -= OnSummaryChanged;
+        Hub.AlertRaised -= OnAlertRaised;
+        Hub.AlertUpdated -= OnAlertUpdated;
+        Theme.ThemeChanged -= OnThemeChanged;
+        try
+        {
+            await JS.InvokeVoidAsync("sentinelCharts.destroyChart", "dash-timeline-chart");
+            await JS.InvokeVoidAsync("sentinelCharts.destroyChart", "dash-level-chart");
+            await JS.InvokeVoidAsync("sentinelCharts.destroyChart", "dash-type-chart");
+            await JS.InvokeVoidAsync("sentinelCharts.destroyChart", "dash-cat-chart");
+        }
+        catch { }
+    }
+}

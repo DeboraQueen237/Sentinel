@@ -1,0 +1,328 @@
+@page "/entities/{Kind}/{*Key}"
+@inject SentinelApiClient Api
+@inject ThemeService Theme
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Fiche d'entité — SENTINEL</PageTitle>
+
+<div style="margin-bottom:14px;">
+    <a href="/entities" class="btn btn-sm btn-ghost">← Retour aux postes &amp; entités</a>
+</div>
+
+<div class="audit-notice" role="note">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" stroke-width="2" style="flex-shrink:0;">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        <path d="M12 8v4" />
+        <path d="M12 16h.01" />
+    </svg>
+    <div>
+        <strong>Transparence &amp; gouvernance (§2.3) :</strong>
+        Cette consultation de fiche est automatiquement enregistrée dans le <a href="/audit">journal d'audit signé</a>.
+    </div>
+</div>
+
+<ErrorBanner Message="@_error" OnRetry="LoadAsync" />
+
+@if (_loading && _profile is null)
+{
+    <SkeletonCards Count="4" />
+}
+else if (_profile is not null)
+{
+    <div class="card" style="margin-bottom:18px;">
+        <div class="page-header" style="margin-bottom:0;">
+            <div style="min-width:0;flex:1;">
+                <div class="row-wrap" style="gap:8px;margin-bottom:6px;">
+                    <span class="badge" style="background:var(--accent-cyan-soft);color:var(--accent-cyan);">
+                        @UiFormatters.EntityKindLabel(_profile.Kind)
+                    </span>
+                    <span class="mono text-muted" style="font-size:12px;">Première vue : @UiFormatters.FormatShortDateTime(_profile.FirstSeen)</span>
+                    <span class="mono text-muted" style="font-size:12px;">• Dernière vue : @UiFormatters.RelativeTime(_profile.LastSeen)</span>
+                </div>
+                <h1 class="page-title" style="word-break:break-all;">@_profile.Label</h1>
+                @if (!string.Equals(_profile.Label, _profile.Key, StringComparison.Ordinal))
+                {
+                    <div class="mono text-secondary" style="font-size:12.5px;margin-top:4px;word-break:break-all;">@_profile.Key</div>
+                }
+            </div>
+            <div class="stack-sm" style="align-items:flex-end;">
+                <div style="width:170px;">
+                    <div class="field-label" style="margin-bottom:4px;">Score de risque</div>
+                    <ScoreBar Score="_profile.RiskScore" />
+                </div>
+                <div class="text-secondary" style="font-size:12px;">
+                    <strong class="mono">@_profile.EventCount.ToString("N0", CultureInfo.GetCultureInfo("fr-FR"))</strong> événement(s) •
+                    <strong class="mono">@_profile.Alerts.Count</strong> alerte(s)
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:18px;">
+        <div class="card">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">Baseline comportementale</h2>
+                    <p class="card-subtitle">Profil des habitudes apprises (heures, processus, domaines, rythme de saisie)</p>
+                </div>
+                @if (_profile.Baseline is not null)
+                {
+                    <span class="mono text-muted" style="font-size:11.5px;">Màj @UiFormatters.RelativeTime(_profile.Baseline.UpdatedAt)</span>
+                }
+            </div>
+
+            @if (_profile.Baseline is { } bl)
+            {
+                <div class="stack-md">
+                    <div>
+                        <div class="field-label" style="margin-bottom:6px;">Heures d'activité habituelles (0 h – 23 h)</div>
+                        <div class="hours-grid">
+                            @for (var h = 0; h < 24; h++)
+                            {
+                                var isUsual = bl.UsualHours.Contains(h);
+                                <div class="hour-cell @(isUsual ? "usual" : "")" title="@($"{h:00}h — {(isUsual ? "Horaire habituel" : "Horaire inhabituel")}")">
+                                    @h
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="grid-2" style="gap:10px;">
+                        <div class="card-elevated">
+                            <div class="field-label">Moyenne d'événements / heure</div>
+                            <div class="mono" style="font-size:20px;font-weight:800;margin-top:4px;">@bl.AvgEventsPerHour.ToString("0.0")</div>
+                        </div>
+                        <div class="card-elevated">
+                            <div class="field-label">Rythme de frappe moyen (KPS)</div>
+                            <div class="mono text-cyan" style="font-size:20px;font-weight:800;margin-top:4px;">@bl.TypingKpsMean.ToString("0.00") <span style="font-size:12px;font-weight:500;">touches/s</span></div>
+                            <div class="field-hint">Statistiques temporelles uniquement (§2.2)</div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="field-label">Processus fréquents</div>
+                        <div class="tag-list">
+                            @if (bl.FrequentProcesses.Count == 0)
+                            {
+                                <span class="text-muted" style="font-size:12px;">Aucun processus dominant appris.</span>
+                            }
+                            else
+                            {
+                                @foreach (var p in bl.FrequentProcesses)
+                                {
+                                    <span class="tag-item">@p</span>
+                                }
+                            }
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="field-label">Domaines habituels</div>
+                        <div class="tag-list">
+                            @if (bl.FrequentDomains.Count == 0)
+                            {
+                                <span class="text-muted" style="font-size:12px;">Aucun domaine dominant appris.</span>
+                            }
+                            else
+                            {
+                                @foreach (var d in bl.FrequentDomains)
+                                {
+                                    <span class="tag-item">@d</span>
+                                }
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <EmptyState Title="Baseline non disponible"
+                            Subtitle="La baseline comportementale est calculée pour les profils utilisateurs et postes." />
+            }
+        </div>
+
+        <div class="stack-md">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Courbe d'activité</h2>
+                        <p class="card-subtitle">Volume d'événements et pic de score</p>
+                    </div>
+                </div>
+                <div class="chart-box-sm">
+                    <canvas id="entity-activity-chart"></canvas>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Propriétés techniques</h2>
+                </div>
+                @if (_profile.Properties.Count == 0)
+                {
+                    <p class="text-muted" style="margin:0;font-size:13px;">Aucune propriété technique supplémentaire.</p>
+                }
+                else
+                {
+                    <div class="table-scroll">
+                        <table class="soc-table">
+                            <tbody>
+                                @foreach (var kv in _profile.Properties)
+                                {
+                                    <tr>
+                                        <td class="mono text-cyan" style="width:180px;font-size:12px;">@kv.Key</td>
+                                        <td class="mono" style="font-size:12px;word-break:break-all;">@kv.Value</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Alertes associées (@_profile.Alerts.Count)</h2>
+            </div>
+            @if (_profile.Alerts.Count == 0)
+            {
+                <EmptyState Title="Aucune alerte" Subtitle="Cette entité n'est impliquée dans aucune alerte." />
+            }
+            else
+            {
+                <div class="stack-sm">
+                    @foreach (var alert in _profile.Alerts)
+                    {
+                        <div class="alert-row-item" @onclick='() => Nav.NavigateTo($"/alerts/{alert.Id}")'>
+                            <div style="min-width:0;flex:1;">
+                                <div class="row-wrap" style="gap:6px;margin-bottom:4px;">
+                                    <SeverityBadge Level="alert.Level" />
+                                    <span class="badge @UiFormatters.AlertStatusCss(alert.Status)">@UiFormatters.AlertStatusLabel(alert.Status)</span>
+                                </div>
+                                <div style="font-weight:700;" class="truncate">@alert.Title</div>
+                                <div class="text-muted mono" style="font-size:11.5px;">@UiFormatters.FormatShortDateTime(alert.CreatedAt)</div>
+                            </div>
+                            <ScoreBar Score="alert.Score" />
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Événements récents (@_profile.RecentEvents.Count)</h2>
+            </div>
+            @if (_profile.RecentEvents.Count == 0)
+            {
+                <EmptyState Title="Aucun événement récent" />
+            }
+            else
+            {
+                <div class="stack-sm">
+                    @foreach (var ev in _profile.RecentEvents.Take(15))
+                    {
+                        <div class="card-elevated" style="padding:10px 12px;">
+                            <div class="row-wrap" style="justify-content:space-between;margin-bottom:4px;">
+                                <div class="row-wrap" style="gap:6px;">
+                                    <span class="badge" style="background:var(--bg-surface);border-color:var(--border-subtle);">@UiFormatters.EventCategoryLabel(ev.Category)</span>
+                                    <span class="mono text-cyan" style="font-size:12px;font-weight:700;">@ev.EventType</span>
+                                </div>
+                                <span class="mono text-muted" style="font-size:11px;">@UiFormatters.FormatShortDateTime(ev.Timestamp)</span>
+                            </div>
+                            <div class="mono truncate" style="font-size:12px;" title="@ev.Subject">@ev.Subject</div>
+                            <div class="row-wrap" style="justify-content:space-between;margin-top:6px;">
+                                <span class="text-secondary truncate" style="font-size:11.5px;max-width:70%;">@ev.Justification</span>
+                                <ScoreBar Score="ev.Score" />
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string Kind { get; set; } = string.Empty;
+    [Parameter] public string Key { get; set; } = string.Empty;
+
+    private EntityProfileDto? _profile;
+    private bool _loading = true;
+    private bool _chartDirty;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        Theme.ThemeChanged -= OnThemeChanged;
+        Theme.ThemeChanged += OnThemeChanged;
+        await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_chartDirty && _profile is not null)
+        {
+            _chartDirty = false;
+            await RenderActivityChartAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        if (!Enum.TryParse<EntityKind>(Kind, true, out var parsedKind))
+        {
+            _error = $"Type d'entité inconnu : {Kind}.";
+            _loading = false;
+            return;
+        }
+
+        var decodedKey = Uri.UnescapeDataString(Key ?? string.Empty);
+        try
+        {
+            _profile = await Api.GetEntityProfileAsync(parsedKind, decodedKey);
+            _chartDirty = true;
+        }
+        catch (SentinelApiException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task RenderActivityChartAsync()
+    {
+        if (_profile is null) return;
+        try
+        {
+            var labels = _profile.Activity.Select(p => p.Timestamp.ToLocalTime().ToString("dd/MM HH:mm")).ToArray();
+            var eventsData = _profile.Activity.Select(p => p.Events).ToArray();
+            var maxScores = _profile.Activity.Select(p => p.MaxScore).ToArray();
+            await JS.InvokeVoidAsync("sentinelCharts.renderEntityActivityChart",
+                "entity-activity-chart", labels, eventsData, maxScores);
+        }
+        catch { }
+    }
+
+    private void OnThemeChanged(string theme)
+    {
+        _chartDirty = true;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Theme.ThemeChanged -= OnThemeChanged;
+        try { await JS.InvokeVoidAsync("sentinelCharts.destroyChart", "entity-activity-chart"); } catch { }
+    }
+}

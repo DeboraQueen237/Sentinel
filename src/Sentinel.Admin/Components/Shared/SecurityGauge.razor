@@ -1,0 +1,40 @@
+@{
+    var clamped = Math.Clamp(Score, 0, 100);
+    var (label, cssClass, colorHex) = UiFormatters.GlobalSecurityStatus(clamped);
+    const double radius = 78;
+    var circumference = 2 * Math.PI * radius;
+    var dashOffset = circumference * (1.0 - clamped / 100.0);
+    var circStr = circumference.ToString("0.##", CultureInfo.InvariantCulture);
+    var offsetStr = dashOffset.ToString("0.##", CultureInfo.InvariantCulture);
+}
+
+<div class="card gauge-card">
+    <div class="card-subtitle" style="text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:10px;">
+        Score de sécurité global
+    </div>
+    <div class="gauge-svg-wrap">
+        <svg class="gauge-svg" viewBox="0 0 184 184" aria-label="Score de sécurité global @clamped sur 100">
+            <circle class="gauge-track" cx="92" cy="92" r="78" />
+            <circle class="gauge-progress"
+                    cx="92" cy="92" r="78"
+                    stroke="@colorHex"
+                    stroke-dasharray="@circStr"
+                    stroke-dashoffset="@offsetStr"
+                    style="filter: drop-shadow(0 0 8px @colorHex);" />
+        </svg>
+        <div class="gauge-center">
+            <span class="gauge-score" style="color:@colorHex;">@clamped</span>
+            <span class="gauge-max">/ 100</span>
+        </div>
+    </div>
+    <span class="gauge-status @cssClass">@label</span>
+    @if (!string.IsNullOrWhiteSpace(FooterText))
+    {
+        <div class="text-muted" style="font-size:11.5px;margin-top:8px;">@FooterText</div>
+    }
+</div>
+
+@code {
+    [Parameter] public int Score { get; set; } = 100;
+    [Parameter] public string? FooterText { get; set; }
+}

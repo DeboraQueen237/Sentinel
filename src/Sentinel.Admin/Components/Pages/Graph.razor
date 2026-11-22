@@ -1,0 +1,544 @@
+@page "/graph"
+@page "/graph/{ClusterId:guid}"
+@inject SentinelApiClient Api
+@inject ThemeService Theme
+@inject ToastService Toasts
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@implements IAsyncDisposable
+
+<PageTitle>Graphe de corrélation — SENTINEL</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Graphe de corrélation</h1>
+        <p class="page-subtitle">Exploration interactive des clusters, entités partagées et chaînes d'attaque détectées (F4, F5, F9)</p>
+    </div>
+    <div class="page-actions">
+        <button type="button" class="btn" @onclick="ExportPngAsync" disabled="@(_graph is null || _graph.Nodes.Count == 0)">Exporter PNG</button>
+        <button type="button" class="btn btn-primary" @onclick="LoadGraphAsync" disabled="@_loading">
+            @(_loading ? "Chargement…" : "Actualiser")
+        </button>
+    </div>
+</div>
+
+<ErrorBanner Message="@_error" OnRetry="LoadGraphAsync" />
+
+<div class="filter-bar">
+    <div class="field">
+        <label class="field-label">Fenêtre temporelle</label>
+        <select class="select" @bind="_window" @bind:after="LoadGraphAsync">
+            <option value="1h">Dernière heure</option>
+            <option value="6h">6 dernières heures</option>
+            <option value="24h">24 dernières heures</option>
+            <option value="7d">7 derniers jours</option>
+        </select>
+    </div>
+
+    <div class="field">
+        <label class="field-label">Score min : <strong class="mono text-cyan">@_minScore</strong></label>
+        <input type="range" class="range-slider" min="0" max="90" step="5"
+               @bind="_minScore" @bind:after="LoadGraphAsync" />
+    </div>
+
+    <div class="field">
+        <label class="field-label">Poste</label>
+        <select class="select" @bind="_hostFilter" @bind:after="LoadGraphAsync">
+            <option value="">Tous les postes</option>
+            @foreach (var h in _hosts)
+            {
+                <option value="@h.HostId">@h.MachineName</option>
+            }
+        </select>
+    </div>
+
+    <div class="field">
+        <label class="field-label">Cluster actif</label>
+        <select class="select" @bind="_selectedClusterKey" @bind:after="OnClusterFilterChangedAsync">
+            <option value="">Tous les clusters (@(_graph?.Clusters.Count ?? 0))</option>
+            @if (_graph is not null)
+            {
+                @foreach (var c in _graph.Clusters.OrderByDescending(x => x.Score))
+                {
+                    <option value="@c.Id">@(c.ChainName ?? $"Cluster {c.Id.ToString()[..6]}") — Score @c.Score (@c.EventCount év.)</option>
+                }
+            }
+        </select>
+    </div>
+
+    <div class="field">
+        <label class="field-label">Disposition (Layout)</label>
+        <select class="select" @bind="_layout" @bind:after="ApplyLayoutAsync">
+            <option value="cose">Force-directed (CoSE)</option>
+            <option value="breadthfirst">Hiérarchique (Chaîne)</option>
+            <option value="concentric">Concentrique (Score)</option>
+            <option value="circle">Circulaire</option>
+            <option value="grid">Grille</option>
+        </select>
+    </div>
+
+    <div class="field" style="flex:0 0 auto;min-width:auto;">
+        <label class="field-label">Regroupement</label>
+        <button type="button" class="btn @(_groupClusters ? "btn-violet" : "")" @onclick="ToggleGroupingAsync">
+            @(_groupClusters ? "Clusters groupés ✓" : "Vue libre")
+        </button>
+    </div>
+</div>
+
+<div class="graph-workspace">
+    <div class="graph-stage">
+        <div class="graph-legend" aria-label="Légende des nœuds">
+            <span class="legend-item"><span class="legend-swatch" style="background:#ef4444;transform:rotate(45deg);"></span>Menace</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#8b5cf6;"></span>Processus</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#f59e0b;"></span>Fichier</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#06b6d4;border-radius:50%;"></span>Domaine</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#38bdf8;border-radius:50%;"></span>IP</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#f97316;"></span>Périphérique</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#10b981;"></span>Utilisateur</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#6366f1;"></span>Poste</span>
+        </div>
+
+        @if (_graph is not null && _graph.Nodes.Count == 0 && !_loading)
+        {
+            <div style="height:100%;display:grid;place-items:center;">
+                <EmptyState Title="Aucun nœud à afficher"
+                            Subtitle="Abaissez le score minimum ou élargissez la fenêtre temporelle pour explorer le graphe." />
+            </div>
+        }
+
+        <div id="sentinel-cy-container" class="graph-canvas"></div>
+
+        <div class="graph-floating-controls">
+            <button type="button" class="btn btn-sm" title="Zoom avant" @onclick="ZoomInAsync">＋</button>
+            <button type="button" class="btn btn-sm" title="Zoom arrière" @onclick="ZoomOutAsync">－</button>
+            <button type="button" class="btn btn-sm" title="Ajuster à l'écran" @onclick="FitAsync">Ajuster</button>
+            @if (!string.IsNullOrWhiteSpace(_selectedClusterKey))
+            {
+                <button type="button" class="btn btn-sm btn-violet" @onclick="ClearClusterFocusAsync">Tout afficher</button>
+            }
+        </div>
+    </div>
+
+    <aside class="graph-inspector">
+        @if (_selectedNode is not null)
+        {
+            <div class="row-wrap" style="justify-content:space-between;">
+                <span class="badge" style="background:var(--accent-cyan-soft);color:var(--accent-cyan);">
+                    @UiFormatters.GraphNodeTypeLabel(_selectedNode.Type)
+                </span>
+                <SeverityBadge Level="_selectedNode.Level" />
+            </div>
+            <h3 style="margin:0;font-size:15px;word-break:break-all;">@_selectedNode.Label</h3>
+            <ScoreBar Score="_selectedNode.Score" />
+
+            @if (_selectedNode.Timestamp.HasValue)
+            {
+                <div class="mono text-muted" style="font-size:12px;">@UiFormatters.FormatDateTime(_selectedNode.Timestamp.Value)</div>
+            }
+
+            @if (TryMapEntityKind(_selectedNode.Type, out var entityKind))
+            {
+                <a class="btn btn-sm btn-primary" href="@UiFormatters.EntityDetailHref(entityKind, _selectedNode.Label)">
+                    Ouvrir la fiche @UiFormatters.EntityKindLabel(entityKind) →
+                </a>
+            }
+
+            @if (_selectedNode.Data.Count > 0)
+            {
+                <div>
+                    <div class="field-label" style="margin-bottom:6px;">Métadonnées</div>
+                    <div class="stack-sm" style="gap:6px;">
+                        @foreach (var kv in _selectedNode.Data)
+                        {
+                            <div class="card-elevated" style="padding:8px 10px;">
+                                <div class="mono text-muted" style="font-size:10.5px;">@kv.Key</div>
+                                <div class="mono" style="font-size:12px;word-break:break-all;">@kv.Value</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (_selectedNode.ClusterId.HasValue && FindCluster(_selectedNode.ClusterId.Value) is { } parentCluster)
+            {
+                <div class="card-elevated stack-sm">
+                    <div class="field-label">Appartient au cluster</div>
+                    <div style="font-weight:700;">@(parentCluster.ChainName ?? $"Cluster {parentCluster.Id.ToString()[..8]}")</div>
+                    <ScoreBar Score="parentCluster.Score" />
+                    <button type="button" class="btn btn-sm btn-violet" @onclick="() => FocusClusterAsync(parentCluster)">
+                        Mettre en évidence le cluster
+                    </button>
+                </div>
+            }
+        }
+        else if (_selectedCluster is not null)
+        {
+            <div class="row-wrap" style="justify-content:space-between;">
+                <span class="badge" style="background:var(--accent-violet-soft);color:var(--accent-violet);">Cluster corrélé</span>
+                <SeverityBadge Level="_selectedCluster.Level" />
+            </div>
+            <h3 style="margin:0;font-size:16px;">@(_selectedCluster.ChainName ?? $"Cluster {_selectedCluster.Id.ToString()[..8]}")</h3>
+            <ScoreBar Score="_selectedCluster.Score" />
+
+            <div class="card-elevated" style="font-size:12.5px;">
+                <div class="row-wrap" style="justify-content:space-between;">
+                    <span class="text-secondary">Score max individuel</span>
+                    <strong class="mono">@_selectedCluster.MaxEventScore</strong>
+                </div>
+                <div class="row-wrap" style="justify-content:space-between;margin-top:4px;">
+                    <span class="text-secondary">Gain de corrélation</span>
+                    <strong class="mono text-emerald">+@(Math.Max(0, _selectedCluster.Score - _selectedCluster.MaxEventScore)) pts</strong>
+                </div>
+                <div class="row-wrap" style="justify-content:space-between;margin-top:4px;">
+                    <span class="text-secondary">Événements reliés</span>
+                    <strong class="mono">@_selectedCluster.EventCount</strong>
+                </div>
+            </div>
+
+            @if (_selectedCluster.ChainTotalSteps > 0)
+            {
+                var pct = Math.Min(100, (int)Math.Round(100.0 * _selectedCluster.ChainStepsMatched / _selectedCluster.ChainTotalSteps));
+                <div>
+                    <div class="row-wrap" style="justify-content:space-between;font-size:12px;margin-bottom:4px;">
+                        <span class="field-label">Progression chaîne d'attaque</span>
+                        <span class="mono">@_selectedCluster.ChainStepsMatched / @_selectedCluster.ChainTotalSteps</span>
+                    </div>
+                    <div class="score-track" style="height:8px;">
+                        <div class="score-fill" style="width:@(pct)%;background:linear-gradient(90deg, var(--accent-cyan), var(--accent-crimson));"></div>
+                    </div>
+                </div>
+            }
+
+            @if (_selectedCluster.Escalated)
+            {
+                <span class="badge sev-high">Escalade précoce activée (2ᵉ événement)</span>
+            }
+
+            <div class="explain-box" style="padding:12px;">
+                <div class="field-label" style="margin-bottom:4px;">Justification</div>
+                <div style="font-size:12.5px;line-height:1.5;">@_selectedCluster.Justification</div>
+            </div>
+
+            @if (_selectedCluster.ContextKeys.Count > 0)
+            {
+                <div>
+                    <div class="field-label" style="margin-bottom:4px;">Clés de contexte partagées</div>
+                    <div class="tag-list" style="margin-top:0;">
+                        @foreach (var k in _selectedCluster.ContextKeys)
+                        {
+                            <span class="tag-item">@k</span>
+                        }
+                    </div>
+                </div>
+            }
+
+            <div>
+                <div class="field-label" style="margin-bottom:4px;">MITRE ATT&amp;CK</div>
+                <MitreChips Techniques="_selectedCluster.MitreTechniques" />
+            </div>
+
+            <a href="/alerts" class="btn btn-sm btn-primary">Voir les alertes liées →</a>
+        }
+        else if (_selectedEdge is not null)
+        {
+            <span class="badge sev-low">Relation de corrélation</span>
+            <h3 style="margin:0;font-size:15px;" class="mono">@(_selectedEdge.Label ?? UiFormatters.GraphEdgeTypeLabel(_selectedEdge.Type))</h3>
+            <div class="card-elevated stack-sm" style="font-size:12px;">
+                <div><span class="text-muted">Type :</span> <strong class="mono">@UiFormatters.GraphEdgeTypeLabel(_selectedEdge.Type)</strong></div>
+                <div><span class="text-muted">Source :</span> <span class="mono">@_selectedEdge.Source</span></div>
+                <div><span class="text-muted">Cible :</span> <span class="mono">@_selectedEdge.Target</span></div>
+                <div><span class="text-muted">Poids :</span> <strong class="mono">@_selectedEdge.Weight.ToString("0.00")</strong></div>
+            </div>
+        }
+        else
+        {
+            <div class="card-header" style="margin-bottom:4px;">
+                <div>
+                    <h3 class="card-title">Inspection &amp; Clusters</h3>
+                    <p class="card-subtitle">Cliquez sur un nœud, une arête ou un cluster pour l'analyser</p>
+                </div>
+            </div>
+
+            @if (_graph is not null)
+            {
+                <div class="row-wrap" style="justify-content:space-between;font-size:12px;" >
+                    <span class="text-secondary">Nœuds : <strong class="mono">@_graph.Nodes.Count</strong></span>
+                    <span class="text-secondary">Arêtes : <strong class="mono">@_graph.Edges.Count</strong></span>
+                    <span class="text-secondary">Clusters : <strong class="mono">@_graph.Clusters.Count</strong></span>
+                </div>
+
+                @if (_graph.Clusters.Count == 0)
+                {
+                    <p class="text-muted" style="font-size:12.5px;">Aucun cluster corrélé dans cette fenêtre temporelle.</p>
+                }
+                else
+                {
+                    <div class="stack-sm">
+                        @foreach (var c in _graph.Clusters.OrderByDescending(x => x.Score))
+                        {
+                            <div class="card-elevated" style="cursor:pointer;" @onclick="() => FocusClusterAsync(c)">
+                                <div class="row-wrap" style="justify-content:space-between;margin-bottom:4px;">
+                                    <strong style="font-size:13px;">@(c.ChainName ?? $"Cluster {c.Id.ToString()[..6]}")</strong>
+                                    <SeverityBadge Level="c.Level" />
+                                </div>
+                                <ScoreBar Score="c.Score" />
+                                <div class="text-muted" style="font-size:11.5px;margin-top:6px;">
+                                    @c.EventCount événement(s) • @UiFormatters.ThreatTypeLabel(c.DominantType)
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+        }
+    </aside>
+</div>
+
+@code {
+    [Parameter] public Guid? ClusterId { get; set; }
+
+    private GraphDto? _graph;
+    private IReadOnlyList<HostDto> _hosts = Array.Empty<HostDto>();
+    private DotNetObjectReference<Graph>? _dotNetRef;
+
+    private string _window = "24h";
+    private int _minScore = 20;
+    private string _hostFilter = string.Empty;
+    private string _selectedClusterKey = string.Empty;
+    private string _layout = "cose";
+    private bool _groupClusters = true;
+    private bool _loading = true;
+    private bool _needsRender;
+    private string? _error;
+
+    private GraphNodeDto? _selectedNode;
+    private GraphEdgeDto? _selectedEdge;
+    private ClusterDto? _selectedCluster;
+
+    private Guid? _lastRouteClusterId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _dotNetRef = DotNetObjectReference.Create(this);
+        Theme.ThemeChanged += OnThemeChanged;
+        _lastRouteClusterId = ClusterId;
+
+        if (ClusterId.HasValue)
+        {
+            _selectedClusterKey = ClusterId.Value.ToString();
+            _minScore = 0;
+        }
+
+        try { _hosts = await Api.GetHostsAsync(); } catch { }
+        await LoadGraphAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ClusterId != _lastRouteClusterId)
+        {
+            _lastRouteClusterId = ClusterId;
+            _selectedClusterKey = ClusterId?.ToString() ?? string.Empty;
+            if (ClusterId.HasValue) _minScore = 0;
+            await LoadGraphAsync();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_needsRender && _graph is not null)
+        {
+            _needsRender = false;
+            await RenderCytoscapeAsync();
+        }
+    }
+
+    private async Task LoadGraphAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var from = _window switch
+            {
+                "1h" => DateTimeOffset.UtcNow.AddHours(-1),
+                "6h" => DateTimeOffset.UtcNow.AddHours(-6),
+                "7d" => DateTimeOffset.UtcNow.AddDays(-7),
+                _ => DateTimeOffset.UtcNow.AddHours(-24)
+            };
+
+            Guid? filterCluster = Guid.TryParse(_selectedClusterKey, out var cid) ? cid : null;
+
+            _graph = await Api.GetGraphAsync(
+                from: from,
+                to: DateTimeOffset.UtcNow,
+                hostId: string.IsNullOrWhiteSpace(_hostFilter) ? null : _hostFilter,
+                minScore: _minScore,
+                clusterId: filterCluster,
+                limit: 250);
+
+            _selectedNode = null;
+            _selectedEdge = null;
+            _selectedCluster = filterCluster.HasValue ? FindCluster(filterCluster.Value) : null;
+            _needsRender = true;
+        }
+        catch (SentinelApiException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task RenderCytoscapeAsync()
+    {
+        if (_graph is null || _dotNetRef is null) return;
+        try
+        {
+            var payload = new
+            {
+                nodes = _graph.Nodes.Select(n => new
+                {
+                    id = n.Id,
+                    type = n.Type.ToString(),
+                    label = n.Label,
+                    score = n.Score,
+                    level = n.Level.ToString(),
+                    clusterId = n.ClusterId?.ToString()
+                }),
+                edges = _graph.Edges.Select(e => new
+                {
+                    id = e.Id,
+                    source = e.Source,
+                    target = e.Target,
+                    type = e.Type.ToString(),
+                    weight = e.Weight,
+                    label = e.Label ?? UiFormatters.GraphEdgeTypeLabel(e.Type)
+                }),
+                clusters = _graph.Clusters.Select(c => new
+                {
+                    id = c.Id.ToString(),
+                    score = c.Score,
+                    level = c.Level.ToString(),
+                    chainName = c.ChainName
+                })
+            };
+
+            await JS.InvokeVoidAsync("sentinelGraph.render", "sentinel-cy-container", payload, _layout, _groupClusters, _dotNetRef);
+        }
+        catch { }
+    }
+
+    private Task OnClusterFilterChangedAsync() => LoadGraphAsync();
+
+    private async Task FocusClusterAsync(ClusterDto cluster)
+    {
+        _selectedCluster = cluster;
+        _selectedNode = null;
+        _selectedEdge = null;
+        _selectedClusterKey = cluster.Id.ToString();
+        try
+        {
+            await JS.InvokeVoidAsync("sentinelGraph.highlightCluster", cluster.Id.ToString());
+        }
+        catch { }
+    }
+
+    private async Task ClearClusterFocusAsync()
+    {
+        _selectedClusterKey = string.Empty;
+        _selectedCluster = null;
+        await LoadGraphAsync();
+    }
+
+    private async Task ApplyLayoutAsync()
+    {
+        try { await JS.InvokeVoidAsync("sentinelGraph.setLayout", _layout); } catch { }
+    }
+
+    private async Task ToggleGroupingAsync()
+    {
+        _groupClusters = !_groupClusters;
+        await RenderCytoscapeAsync();
+    }
+
+    private Task ZoomInAsync() => JS.InvokeVoidAsync("sentinelGraph.zoomIn").AsTask();
+    private Task ZoomOutAsync() => JS.InvokeVoidAsync("sentinelGraph.zoomOut").AsTask();
+    private Task FitAsync() => JS.InvokeVoidAsync("sentinelGraph.fit").AsTask();
+
+    private async Task ExportPngAsync()
+    {
+        var ok = await JS.InvokeAsync<bool>("sentinelGraph.exportPng", $"sentinel-graphe-{DateTime.Now:yyyyMMdd-HHmm}.png");
+        if (ok) Toasts.Success("Graphe exporté", "Image PNG téléchargée.");
+    }
+
+    [JSInvokable]
+    public void OnNodeSelected(string nodeId)
+    {
+        _selectedNode = _graph?.Nodes.FirstOrDefault(n => n.Id == nodeId);
+        _selectedEdge = null;
+        _selectedCluster = null;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnEdgeSelected(string edgeId)
+    {
+        _selectedEdge = _graph?.Edges.FirstOrDefault(e => e.Id == edgeId);
+        _selectedNode = null;
+        _selectedCluster = null;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnClusterSelected(string clusterId)
+    {
+        if (Guid.TryParse(clusterId, out var cid))
+        {
+            _selectedCluster = FindCluster(cid);
+            _selectedNode = null;
+            _selectedEdge = null;
+            StateHasChanged();
+        }
+    }
+
+    [JSInvokable]
+    public void OnCanvasCleared()
+    {
+        _selectedNode = null;
+        _selectedEdge = null;
+        _selectedCluster = null;
+        StateHasChanged();
+    }
+
+    private ClusterDto? FindCluster(Guid id) => _graph?.Clusters.FirstOrDefault(c => c.Id == id);
+
+    private static bool TryMapEntityKind(GraphNodeType type, out EntityKind kind)
+    {
+        switch (type)
+        {
+            case GraphNodeType.Host: kind = EntityKind.Host; return true;
+            case GraphNodeType.User: kind = EntityKind.User; return true;
+            case GraphNodeType.Domain: kind = EntityKind.Domain; return true;
+            case GraphNodeType.Process: kind = EntityKind.Process; return true;
+            case GraphNodeType.File: kind = EntityKind.File; return true;
+            case GraphNodeType.Device: kind = EntityKind.Device; return true;
+            case GraphNodeType.Ip: kind = EntityKind.Ip; return true;
+            default: kind = default; return false;
+        }
+    }
+
+    private void OnThemeChanged(string theme) => _ = InvokeAsync(async () =>
+    {
+        try { await JS.InvokeVoidAsync("sentinelGraph.updateTheme"); } catch { }
+    });
+
+    public async ValueTask DisposeAsync()
+    {
+        Theme.ThemeChanged -= OnThemeChanged;
+        try { await JS.InvokeVoidAsync("sentinelGraph.destroy"); } catch { }
+        _dotNetRef?.Dispose();
+    }
+}

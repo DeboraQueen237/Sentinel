@@ -1,0 +1,245 @@
+@page "/audit"
+@inject SentinelApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>Audit &amp; Intégrité — SENTINEL</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Audit &amp; Intégrité cryptographique</h1>
+        <p class="page-subtitle">Traçabilité de chaque consultation ou décision administrateur et contrôle des chaînes de hash SHA-256 (§2.3, §11)</p>
+    </div>
+    <div class="page-actions">
+        <button type="button" class="btn btn-emerald" @onclick="VerifyIntegrityAsync" disabled="@_verifying">
+            @(_verifying ? "Vérification cryptographique…" : "Vérifier les chaînes de hash")
+        </button>
+        <button type="button" class="btn btn-primary" @onclick="LoadAuditAsync" disabled="@_loading">Actualiser</button>
+    </div>
+</div>
+
+<ErrorBanner Message="@_error" OnRetry="LoadAuditAsync" />
+
+@if (_integrityReports is { Count: > 0 })
+{
+    <div class="grid-2" style="margin-bottom:18px;">
+        @foreach (var rep in _integrityReports)
+        {
+            <div class="integrity-card @(rep.Valid ? "valid" : "invalid")">
+                <div style="font-size:24px;line-height:1;">@(rep.Valid ? "✓" : "✕")</div>
+                <div style="flex:1;">
+                    <div class="row-wrap" style="justify-content:space-between;">
+                        <strong style="font-size:15px;">@ScopeLabel(rep.Scope)</strong>
+                        <span class="badge @(rep.Valid ? "act-reverted" : "sev-critical")">
+                            @(rep.Valid ? "Intégrité vérifiée" : "ALTÉRATION DÉTECTÉE")
+                        </span>
+                    </div>
+                    <div class="text-secondary" style="font-size:12.5px;margin-top:4px;">
+                        <strong class="mono">@rep.CheckedEntries.ToString("N0", CultureInfo.GetCultureInfo("fr-FR"))</strong> entrée(s) contrôlée(s) en chaîne SHA-256.
+                        @if (!rep.Valid && rep.FirstBrokenId.HasValue)
+                        {
+                            <div class="text-crimson mono" style="margin-top:4px;font-weight:700;">
+                                Premier maillon rompu : ID #@rep.FirstBrokenId.Value
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+<div class="filter-bar">
+    <div class="field">
+        <label class="field-label">Acteur</label>
+        <input class="input" placeholder="ex. admin" @bind="_actor" @onkeydown="OnKeyDown" />
+    </div>
+    <div class="field">
+        <label class="field-label">Action</label>
+        <input class="input" placeholder="ex. Login, ViewEntity, ApproveAlert…" @bind="_action" @onkeydown="OnKeyDown" />
+    </div>
+    <div class="field">
+        <label class="field-label">Du</label>
+        <input type="date" class="input mono" @bind="_fromDate" />
+    </div>
+    <div class="field">
+        <label class="field-label">Au</label>
+        <input type="date" class="input mono" @bind="_toDate" />
+    </div>
+    <button type="button" class="btn btn-primary" @onclick="ApplyFiltersAsync">Filtrer</button>
+    <button type="button" class="btn" @onclick="ResetFiltersAsync">Réinitialiser</button>
+</div>
+
+@if (_loading && _audit is null)
+{
+    <SkeletonCards Count="4" />
+}
+else if (_audit is null || _audit.Items.Count == 0)
+{
+    <div class="card">
+        <EmptyState Title="Aucune entrée d'audit"
+                    Subtitle="Aucune trace ne correspond aux filtres sélectionnés." />
+    </div>
+}
+else
+{
+    <div class="table-scroll">
+        <table class="soc-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Horodatage</th>
+                    <th>Acteur</th>
+                    <th>Action</th>
+                    <th>Cible &amp; détails</th>
+                    <th>IP</th>
+                    <th>Chaîne SHA-256</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var entry in _audit.Items)
+                {
+                    <tr>
+                        <td class="mono text-muted">@entry.Id</td>
+                        <td class="mono" style="white-space:nowrap;font-size:12px;">@UiFormatters.FormatDateTime(entry.Timestamp)</td>
+                        <td class="mono" style="font-weight:600;">@entry.Actor</td>
+                        <td>
+                            <span class="badge" style="background:var(--accent-cyan-soft);color:var(--accent-cyan);">@entry.Action</span>
+                        </td>
+                        <td style="max-width:300px;">
+                            <div class="mono truncate" style="font-size:12px;" title="@entry.Target">@entry.Target</div>
+                            @if (!string.IsNullOrWhiteSpace(entry.Details))
+                            {
+                                <div class="text-secondary truncate" style="font-size:11.5px;" title="@entry.Details">@entry.Details</div>
+                            }
+                        </td>
+                        <td class="mono text-muted" style="font-size:12px;">@(entry.IpAddress ?? "—")</td>
+                        <td>
+                            <div class="row-wrap" style="gap:6px;flex-wrap:nowrap;">
+                                <div class="mono" style="font-size:11px;line-height:1.35;">
+                                    <div title="@entry.Hash"><span class="text-muted">H:</span> <span class="text-emerald">@UiFormatters.TruncateHash(entry.Hash, 14)</span></div>
+                                    <div title="@entry.PreviousHash"><span class="text-muted">P:</span> <span class="text-muted">@UiFormatters.TruncateHash(entry.PreviousHash, 14)</span></div>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-ghost" title="Copier le hash complet"
+                                        @onclick="() => CopyHashAsync(entry.Hash)">
+                                    ⧉
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <Pagination Page="_page" PageSize="PageSize" Total="_audit.Total" OnPageChanged="ChangePageAsync" />
+}
+
+@code {
+    private const int PageSize = 40;
+    private PagedResult<AuditEntryDto>? _audit;
+    private IReadOnlyList<IntegrityReportDto>? _integrityReports;
+
+    private string _actor = string.Empty;
+    private string _action = string.Empty;
+    private DateOnly? _fromDate;
+    private DateOnly? _toDate;
+    private int _page = 1;
+    private bool _loading = true;
+    private bool _verifying;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAuditAsync();
+    }
+
+    private async Task LoadAuditAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            DateTimeOffset? from = _fromDate.HasValue
+                ? new DateTimeOffset(_fromDate.Value.ToDateTime(TimeOnly.MinValue), TimeZoneInfo.Local.GetUtcOffset(DateTime.Now))
+                : null;
+            DateTimeOffset? to = _toDate.HasValue
+                ? new DateTimeOffset(_toDate.Value.ToDateTime(new TimeOnly(23, 59, 59)), TimeZoneInfo.Local.GetUtcOffset(DateTime.Now))
+                : null;
+
+            _audit = await Api.GetAuditAsync(
+                actor: string.IsNullOrWhiteSpace(_actor) ? null : _actor.Trim(),
+                action: string.IsNullOrWhiteSpace(_action) ? null : _action.Trim(),
+                from: from,
+                to: to,
+                page: _page,
+                pageSize: PageSize);
+        }
+        catch (SentinelApiException ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task VerifyIntegrityAsync()
+    {
+        _verifying = true;
+        _error = null;
+        try
+        {
+            _integrityReports = await Api.VerifyIntegrityAsync();
+            if (_integrityReports.All(r => r.Valid))
+            {
+                Toasts.Success("Intégrité confirmée", "Toutes les chaînes de hash cryptographiques sont intactes.");
+            }
+            else
+            {
+                Toasts.Danger("Altération détectée", "Une rupture a été détectée dans la chaîne de hash d'un journal !");
+            }
+        }
+        catch (SentinelApiException ex)
+        {
+            _error = ex.Message;
+            Toasts.Danger("Vérification échouée", ex.Message);
+        }
+        finally
+        {
+            _verifying = false;
+        }
+    }
+
+    private Task ApplyFiltersAsync()
+    {
+        _page = 1;
+        return LoadAuditAsync();
+    }
+
+    private Task ResetFiltersAsync()
+    {
+        _actor = string.Empty;
+        _action = string.Empty;
+        _fromDate = null;
+        _toDate = null;
+        _page = 1;
+        return LoadAuditAsync();
+    }
+
+    private Task ChangePageAsync(int next)
+    {
+        _page = next;
+        return LoadAuditAsync();
+    }
+
+    private Task OnKeyDown(KeyboardEventArgs e) => e.Key == "Enter" ? ApplyFiltersAsync() : Task.CompletedTask;
+
+    private async Task CopyHashAsync(string hash)
+    {
+        var ok = await JS.InvokeAsync<bool>("sentinelUtils.copyText", hash);
+        if (ok) Toasts.Info("Hash copié", UiFormatters.TruncateHash(hash, 24));
+    }
+
+    private static string ScopeLabel(string scope) => scope.ToLowerInvariant() switch
+    {
+        "audit" or "auditlog" or "audit_log" => "Journal d'Audit administrateur",
+        "events" or "event" or "eventlog" or "security_events" => "Journal d'Événements de sécurité",
+        _ => $"Journal : {scope}"
+    };
+}

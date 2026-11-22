@@ -1,0 +1,25 @@
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="error-banner" role="alert">
+        <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent-crimson)" stroke-width="2" style="flex-shrink:0;">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <div>
+                <div style="font-weight:700;font-size:13px;">Erreur de communication</div>
+                <div style="font-size:12.5px;color:var(--text-secondary);">@Message</div>
+            </div>
+        </div>
+        @if (OnRetry.HasDelegate)
+        {
+            <button type="button" class="btn btn-sm btn-danger" @onclick="OnRetry">Réessayer</button>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string? Message { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+}

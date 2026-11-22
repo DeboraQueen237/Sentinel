@@ -1,0 +1,404 @@
+@page "/actions"
+@inject SentinelApiClient Api
+@inject LiveHubClient Hub
+@inject ToastService Toasts
+@implements IDisposable
+
+<PageTitle>Actions &amp; blocages — SENTINEL</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Actions &amp; blocages</h1>
+        <p class="page-subtitle">Gestion des mesures automatiques, propositions niveau 3 et réversibilité en 1 clic (F6, F7)</p>
+    </div>
+    <div class="page-actions">
+        <button type="button" class="btn btn-primary" @onclick="OpenManualModal">＋ Nouveau blocage manuel</button>
+        <button type="button" class="btn" @onclick="LoadAsync" disabled="@_loading">Actualiser</button>
+    </div>
+</div>
+
+<ErrorBanner Message="@_error" OnRetry="LoadAsync" />
+
+<div class="kpi-grid" style="margin-bottom:18px;">
+    <div class="kpi-card" style="--kpi-accent:var(--accent-crimson);">
+        <div class="kpi-label"><span>Blocages actifs</span></div>
+        <div class="kpi-value text-crimson">@_activeCount</div>
+        <div class="kpi-meta">Exécutés ou en attente d'agent</div>
+    </div>
+    <div class="kpi-card" style="--kpi-accent:var(--accent-amber);">
+        <div class="kpi-label"><span>Propositions en attente</span></div>
+        <div class="kpi-value text-amber">@_proposedCount</div>
+        <div class="kpi-meta">Décision humaine (Niveau 3)</div>
+    </div>
+    <div class="kpi-card" style="--kpi-accent:var(--accent-emerald);">
+        <div class="kpi-label"><span>Actions annulées</span></div>
+        <div class="kpi-value text-emerald">@_revertedCount</div>
+        <div class="kpi-meta">État initial restauré (F7)</div>
+    </div>
+    <div class="kpi-card" style="--kpi-accent:var(--accent-violet);">
+        <div class="kpi-label"><span>Actions simulées</span></div>
+        <div class="kpi-value text-violet">@_simulatedCount</div>
+        <div class="kpi-meta">Mode apprentissage / simulation</div>
+    </div>
+</div>
+
+<div class="filter-bar">
+    <div class="field">
+        <label class="field-label">Affichage</label>
+        <button type="button" class="btn @(_activeOnly ? "btn-primary" : "")" style="width:100%;" @onclick="ToggleActiveOnlyAsync">
+            @(_activeOnly ? "Blocages actifs uniquement ✓" : "Toutes les actions")
+        </button>
+    </div>
+
+    <div class="field">
+        <label class="field-label">Statut</label>
+        <select class="select" @bind="_statusFilter" @bind:after="ApplyFiltersAsync">
+            <option value="">Tous les statuts</option>
+            @foreach (var s in Enum.GetValues<ActionStatus>())
+            {
+                <option value="@s">@UiFormatters.ActionStatusLabel(s)</option>
+            }
+        </select>
+    </div>
+
+    <div class="field">
+        <label class="field-label">Type d'action</label>
+        <select class="select" @bind="_typeFilter" @bind:after="ApplyFiltersAsync">
+            <option value="">Tous les types</option>
+            @foreach (var t in ManualSelectableTypes)
+            {
+                <option value="@t">@UiFormatters.ResponseActionLabel(t)</option>
+            }
+        </select>
+    </div>
+
+    <div class="field">
+        <label class="field-label">Poste</label>
+        <select class="select" @bind="_hostFilter" @bind:after="ApplyFiltersAsync">
+            <option value="">Tous les postes</option>
+            @foreach (var h in _hosts)
+            {
+                <option value="@h.HostId">@h.MachineName</option>
+            }
+        </select>
+    </div>
+</div>
+
+@if (_loading && _result is null)
+{
+    <SkeletonCards Count="4" />
+}
+else if (_result is null || _result.Items.Count == 0)
+{
+    <div class="card">
+        <EmptyState Title="Aucune action enregistrée"
+                    Subtitle="Les blocages automatiques, propositions et blocages manuels apparaîtront ici." />
+    </div>
+}
+else
+{
+    <div class="table-scroll">
+        <table class="soc-table">
+            <thead>
+                <tr>
+                    <th>Action</th>
+                    <th>Cible</th>
+                    <th>Poste</th>
+                    <th>Justification</th>
+                    <th>Mode</th>
+                    <th>Statut</th>
+                    <th>Date</th>
+                    <th>Intervention</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var ticket in _result.Items)
+                {
+                    <tr>
+                        <td>
+                            <strong>@UiFormatters.ResponseActionLabel(ticket.Type)</strong>
+                            @if (ticket.AlertId.HasValue)
+                            {
+                                <div><a href="/alerts/@ticket.AlertId.Value" style="font-size:11.5px;">Voir l'alerte →</a></div>
+                            }
+                        </td>
+                        <td class="mono text-cyan" style="max-width:220px;word-break:break-all;font-size:12px;">@ticket.Target</td>
+                        <td class="mono" style="font-size:12px;">@ticket.HostId</td>
+                        <td style="max-width:250px;overflow-wrap:anywhere;word-break:break-word;">
+                            <div style="font-size:12.5px;">@ticket.Rationale</div>
+                            @if (!string.IsNullOrWhiteSpace(ticket.ResultMessage))
+                            {
+                                <div class="text-muted mono" style="font-size:11px;margin-top:2px;overflow-wrap:anywhere;">@ticket.ResultMessage</div>
+                            }
+                        </td>
+                        <td>
+                            <span class="badge" style="background:var(--bg-elevated);border-color:var(--border-subtle);">
+                                @(ticket.Status == ActionStatus.Simulated ? "Simulé" : (ticket.Automatic ? "Auto" : "Manuel"))
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge @UiFormatters.ActionStatusCss(ticket.Status)">@UiFormatters.ActionStatusLabel(ticket.Status)</span>
+                        </td>
+                        <td class="mono" style="white-space:nowrap;font-size:12px;">
+                            <div>@UiFormatters.FormatShortDateTime(ticket.CreatedAt)</div>
+                            @if (ticket.RevertedAt.HasValue)
+                            {
+                                <div class="text-emerald" style="font-size:11px;">Annulé @UiFormatters.RelativeTime(ticket.RevertedAt.Value)</div>
+                            }
+                        </td>
+                        <td style="white-space:nowrap;">
+                            <div class="row-wrap" style="gap:6px;">
+                                @if (ticket.Status == ActionStatus.Proposed)
+                                {
+                                    <button type="button" class="btn btn-sm btn-primary" disabled="@_acting" @onclick="() => ApproveAsync(ticket)">Approuver</button>
+                                    <button type="button" class="btn btn-sm btn-ghost" disabled="@_acting" @onclick="() => RejectAsync(ticket)">Rejeter</button>
+                                }
+                                @if (ticket.Reversible && ticket.Status is ActionStatus.Executed or ActionStatus.Pending)
+                                {
+                                    <button type="button" class="btn btn-sm btn-emerald" disabled="@_acting" @onclick="() => RevertAsync(ticket)">
+                                        ↩ Annuler
+                                    </button>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <Pagination Page="_page" PageSize="PageSize" Total="_result.Total" OnPageChanged="ChangePageAsync" />
+}
+
+<ModalDialog IsOpen="_manualModalOpen" Title="Nouveau blocage manuel" OnClose="CloseManualModal">
+    <Body>
+        <div class="stack-md">
+            <div class="field">
+                <label class="field-label">Poste cible</label>
+                @if (_hosts.Count > 0)
+                {
+                    <select class="select" @bind="_manualHostId">
+                        @foreach (var h in _hosts)
+                        {
+                            <option value="@h.HostId">@h.MachineName (@h.HostId)</option>
+                        }
+                    </select>
+                }
+                else
+                {
+                    <input class="input mono" placeholder="Identifiant du poste (HostId)" @bind="_manualHostId" />
+                }
+            </div>
+
+            <div class="field">
+                <label class="field-label">Type de mesure</label>
+                <select class="select" @bind="_manualType">
+                    @foreach (var t in ManualSelectableTypes)
+                    {
+                        <option value="@t">@UiFormatters.ResponseActionLabel(t)</option>
+                    }
+                </select>
+            </div>
+
+            <div class="field">
+                <label class="field-label">Cible (domaine, IP, PID/processus, chemin ou périphérique)</label>
+                <input class="input mono" placeholder="ex. evil-phish.xyz ou 185.220.101.4 ou malware.exe" @bind="_manualTarget" />
+            </div>
+
+            <div class="field">
+                <label class="field-label">Motif (journalisé dans l'audit)</label>
+                <textarea class="textarea" placeholder="Justification de la mesure manuelle…" @bind="_manualComment"></textarea>
+            </div>
+        </div>
+    </Body>
+    <Footer>
+        <button type="button" class="btn" @onclick="CloseManualModal" disabled="@_acting">Annuler</button>
+        <button type="button" class="btn btn-danger" @onclick="SubmitManualAsync" disabled="@(_acting || string.IsNullOrWhiteSpace(_manualTarget) || string.IsNullOrWhiteSpace(_manualHostId))">
+            @(_acting ? "Application…" : "Exécuter le blocage")
+        </button>
+    </Footer>
+</ModalDialog>
+
+@code {
+    private const int PageSize = 25;
+
+    private static readonly ResponseActionType[] ManualSelectableTypes =
+    {
+        ResponseActionType.BlockDomain,
+        ResponseActionType.BlockIp,
+        ResponseActionType.KillProcess,
+        ResponseActionType.SuspendProcess,
+        ResponseActionType.QuarantineFile,
+        ResponseActionType.BlockProcessConnections,
+        ResponseActionType.DisableDevice,
+        ResponseActionType.LockSession,
+        ResponseActionType.LockAccount,
+        ResponseActionType.IsolateNetwork,
+        ResponseActionType.ProtectFolders
+    };
+
+    private PagedResult<ActionTicketDto>? _result;
+    private IReadOnlyList<HostDto> _hosts = Array.Empty<HostDto>();
+
+    private bool _activeOnly;
+    private string _statusFilter = string.Empty;
+    private string _typeFilter = string.Empty;
+    private string _hostFilter = string.Empty;
+    private int _page = 1;
+    private bool _loading = true;
+    private bool _acting;
+    private string? _error;
+
+    private int _activeCount;
+    private int _proposedCount;
+    private int _revertedCount;
+    private int _simulatedCount;
+
+    private bool _manualModalOpen;
+    private string _manualHostId = string.Empty;
+    private ResponseActionType _manualType = ResponseActionType.BlockDomain;
+    private string _manualTarget = string.Empty;
+    private string _manualComment = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Hub.ActionUpdated += OnActionLiveUpdated;
+        try
+        {
+            _hosts = await Api.GetHostsAsync();
+            if (_hosts.Count > 0) _manualHostId = _hosts[0].HostId;
+        }
+        catch { }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            ActionStatus? status = Enum.TryParse<ActionStatus>(_statusFilter, true, out var s) ? s : null;
+            ResponseActionType? type = Enum.TryParse<ResponseActionType>(_typeFilter, true, out var t) ? t : null;
+
+            _result = await Api.GetActionsAsync(
+                status: status,
+                type: type,
+                hostId: string.IsNullOrWhiteSpace(_hostFilter) ? null : _hostFilter,
+                activeOnly: _activeOnly ? true : null,
+                page: _page,
+                pageSize: PageSize);
+
+            // Compteurs globaux rapides
+            var allPreview = await Api.GetActionsAsync(page: 1, pageSize: 200);
+            _activeCount = allPreview.Items.Count(a => a.Status is ActionStatus.Executed or ActionStatus.Pending);
+            _proposedCount = allPreview.Items.Count(a => a.Status == ActionStatus.Proposed);
+            _revertedCount = allPreview.Items.Count(a => a.Status == ActionStatus.Reverted);
+            _simulatedCount = allPreview.Items.Count(a => a.Status == ActionStatus.Simulated);
+        }
+        catch (SentinelApiException ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private Task ToggleActiveOnlyAsync()
+    {
+        _activeOnly = !_activeOnly;
+        _page = 1;
+        return LoadAsync();
+    }
+
+    private Task ApplyFiltersAsync()
+    {
+        _page = 1;
+        return LoadAsync();
+    }
+
+    private Task ChangePageAsync(int next)
+    {
+        _page = next;
+        return LoadAsync();
+    }
+
+    private async Task RevertAsync(ActionTicketDto ticket)
+    {
+        _acting = true;
+        try
+        {
+            await Api.RevertActionAsync(ticket.Id);
+            Toasts.Success("Blocage annulé (F7)", $"Restauration demandée pour {ticket.Target}.");
+            await LoadAsync();
+        }
+        catch (SentinelApiException ex) { Toasts.Danger("Échec de l'annulation", ex.Message); }
+        finally { _acting = false; }
+    }
+
+    private async Task ApproveAsync(ActionTicketDto ticket)
+    {
+        _acting = true;
+        try
+        {
+            await Api.ApproveActionAsync(ticket.Id);
+            Toasts.Success("Proposition approuvée", $"Action transmise à l'agent ({ticket.Target}).");
+            await LoadAsync();
+        }
+        catch (SentinelApiException ex) { Toasts.Danger("Erreur", ex.Message); }
+        finally { _acting = false; }
+    }
+
+    private async Task RejectAsync(ActionTicketDto ticket)
+    {
+        _acting = true;
+        try
+        {
+            await Api.RejectActionAsync(ticket.Id);
+            Toasts.Info("Proposition rejetée", $"Aucune mesure exécutée pour {ticket.Target}.");
+            await LoadAsync();
+        }
+        catch (SentinelApiException ex) { Toasts.Danger("Erreur", ex.Message); }
+        finally { _acting = false; }
+    }
+
+    private void OpenManualModal()
+    {
+        if (string.IsNullOrWhiteSpace(_manualHostId) && _hosts.Count > 0) _manualHostId = _hosts[0].HostId;
+        _manualTarget = string.Empty;
+        _manualComment = string.Empty;
+        _manualModalOpen = true;
+    }
+
+    private void CloseManualModal() => _manualModalOpen = false;
+
+    private async Task SubmitManualAsync()
+    {
+        _acting = true;
+        try
+        {
+            var req = new ManualActionRequest(
+                _manualHostId.Trim(),
+                _manualType,
+                _manualTarget.Trim(),
+                string.IsNullOrWhiteSpace(_manualComment) ? null : _manualComment.Trim());
+            await Api.CreateManualActionAsync(req);
+            _manualModalOpen = false;
+            Toasts.Success("Blocage manuel créé", $"{UiFormatters.ResponseActionLabel(_manualType)} → {_manualTarget.Trim()}");
+            await LoadAsync();
+        }
+        catch (SentinelApiException ex) { Toasts.Danger("Échec", ex.Message); }
+        finally { _acting = false; }
+    }
+
+    private void OnActionLiveUpdated(ActionTicketDto ticket) => _ = InvokeAsync(async () =>
+    {
+        if (!_loading)
+        {
+            await LoadAsync();
+            StateHasChanged();
+        }
+    });
+
+    public void Dispose()
+    {
+        Hub.ActionUpdated -= OnActionLiveUpdated;
+    }
+}

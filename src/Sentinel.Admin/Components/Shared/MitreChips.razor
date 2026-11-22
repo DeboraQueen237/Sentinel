@@ -1,0 +1,30 @@
+@if (Techniques is { Count: > 0 })
+{
+    <div class="mitre-list">
+        @foreach (var id in Techniques.Take(MaxVisible))
+        {
+            var info = MitreCatalog.GetOrDefault(id);
+            <span class="mitre-chip">
+                @info.Id
+                <span class="mitre-tooltip">
+                    <span class="tactic">@info.Tactic</span>
+                    <strong>@info.Id — @info.Name</strong>
+                    <span>@info.Description</span>
+                </span>
+            </span>
+        }
+        @if (Techniques.Count > MaxVisible)
+        {
+            <span class="mitre-chip">+@(Techniques.Count - MaxVisible)</span>
+        }
+    </div>
+}
+else
+{
+    <span class="text-muted" style="font-size:12px;">—</span>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<string>? Techniques { get; set; }
+    [Parameter] public int MaxVisible { get; set; } = 6;
+}

@@ -1,0 +1,26 @@
+@if (Total > 0)
+{
+    var totalPages = Math.Max(1, (int)Math.Ceiling((double)Total / Math.Max(1, PageSize)));
+    var start = (Page - 1) * PageSize + 1;
+    var end = Math.Min(Total, Page * PageSize);
+
+    <div class="pagination">
+        <span class="tabular">Affichage <strong style="color:var(--text-primary);">@start–@end</strong> sur <strong style="color:var(--text-primary);">@Total</strong></span>
+        <div class="row-wrap" style="gap:6px;">
+            <button type="button" class="btn btn-sm" disabled="@(Page <= 1)" @onclick="() => GoAsync(1)">«</button>
+            <button type="button" class="btn btn-sm" disabled="@(Page <= 1)" @onclick="() => GoAsync(Page - 1)">Précédent</button>
+            <span class="mono" style="padding:0 8px;font-size:12px;">Page @Page / @totalPages</span>
+            <button type="button" class="btn btn-sm" disabled="@(Page >= totalPages)" @onclick="() => GoAsync(Page + 1)">Suivant</button>
+            <button type="button" class="btn btn-sm" disabled="@(Page >= totalPages)" @onclick="() => GoAsync(totalPages)">»</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Page { get; set; } = 1;
+    [Parameter] public int PageSize { get; set; } = 25;
+    [Parameter] public int Total { get; set; }
+    [Parameter] public EventCallback<int> OnPageChanged { get; set; }
+
+    private Task GoAsync(int next) => OnPageChanged.InvokeAsync(next);
+}

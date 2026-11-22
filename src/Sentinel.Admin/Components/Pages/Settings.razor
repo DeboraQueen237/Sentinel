@@ -1,0 +1,536 @@
+@page "/settings"
+@inject SentinelApiClient Api
+@inject ToastService Toasts
+
+<PageTitle>Paramètres — SENTINEL</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Paramètres SENTINEL</h1>
+        <p class="page-subtitle">Configuration du mode de décision, seuils de menace, exclusions, IA locale Ollama et moteur de corrélation</p>
+    </div>
+    <div class="page-actions">
+        <button type="button" class="btn" @onclick="LoadAsync" disabled="@_loading">Recharger</button>
+        <button type="button" class="btn btn-primary" @onclick="SaveAsync" disabled="@(_saving || !_dirty)">
+            @(_saving ? "Enregistrement…" : "Enregistrer")
+        </button>
+    </div>
+</div>
+
+<ErrorBanner Message="@_error" OnRetry="LoadAsync" />
+
+@if (_loading && _settings is null)
+{
+    <SkeletonCards Count="4" />
+}
+else if (_settings is not null)
+{
+    <div class="stack-md">
+        <!-- 1. Mode de fonctionnement -->
+        <section class="card">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">Mode de fonctionnement</h2>
+                    <p class="card-subtitle">Contrôle l'exécution effective des mesures de réponse par les agents (§9.4)</p>
+                </div>
+            </div>
+
+            <div class="mode-cards" style="margin-bottom:16px;">
+                @foreach (var mode in Enum.GetValues<OperatingMode>())
+                {
+                    var selected = _settings.Mode == mode;
+                    <button type="button"
+                            class="mode-card @UiFormatters.OperatingModeCss(mode) @(selected ? "selected" : "")"
+                            @onclick="() => SelectMode(mode)">
+                        <div class="row-wrap" style="justify-content:space-between;margin-bottom:6px;">
+                            <strong style="font-size:15px;">@UiFormatters.OperatingModeLabel(mode)</strong>
+                            @if (selected)
+                            {
+                                <span class="badge @UiFormatters.OperatingModeCss(mode)">Actif</span>
+                            }
+                        </div>
+                        <div class="text-secondary" style="font-size:12.5px;line-height:1.45;">
+                            @UiFormatters.OperatingModeDescription(mode)
+                        </div>
+                    </button>
+                }
+            </div>
+
+            <div class="grid-2">
+                <div class="field">
+                    <label class="field-label">Durée d'apprentissage initiale (jours)</label>
+                    <input type="number" class="input mono" min="1" max="60"
+                           @bind="_settings.LearningPeriodDays" @bind:after="MarkDirty" />
+                    <span class="field-hint">Démarré le @UiFormatters.FormatShortDateTime(_settings.LearningStartedAt)</span>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Passage automatique en mode Actif</div>
+                        <div class="field-hint">Quitte automatiquement le mode Apprentissage après @_settings.LearningPeriodDays jour(s)</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.AutoLeaveLearning" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+            </div>
+        </section>
+
+        <!-- 2. Seuils de menace -->
+        <section class="card">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">Seuils de menace (0 – 100)</h2>
+                    <p class="card-subtitle">Détermine le déclenchement des notifications, alertes niveau 3 et blocages critiques niveau 4 (§9.1)</p>
+                </div>
+            </div>
+
+            @{
+                var t = _settings.Thresholds;
+                var wInfo = Math.Clamp(t.Low, 0, 100);
+                var wLow = Math.Max(0, t.Moderate - t.Low);
+                var wMod = Math.Max(0, t.High - t.Moderate);
+                var wHigh = Math.Max(0, t.Critical - t.High);
+                var wCrit = Math.Max(0, 100 - t.Critical);
+            }
+
+            <div class="threshold-spectrum" aria-label="Spectre gradué des seuils">
+                <div class="threshold-seg" style="width:@(wInfo)%;background:#38bdf8;" title="Info : 0 – @(t.Low - 1)"></div>
+                <div class="threshold-seg" style="width:@(wLow)%;background:#06b6d4;" title="Faible : @t.Low – @(t.Moderate - 1)"></div>
+                <div class="threshold-seg" style="width:@(wMod)%;background:#f59e0b;" title="Modéré : @t.Moderate – @(t.High - 1)"></div>
+                <div class="threshold-seg" style="width:@(wHigh)%;background:#f97316;" title="Élevé : @t.High – @(t.Critical - 1)"></div>
+                <div class="threshold-seg" style="width:@(wCrit)%;background:#ef4444;" title="Critique : @t.Critical – 100"></div>
+            </div>
+            <div class="row-wrap text-muted mono" style="justify-content:space-between;font-size:11px;margin-bottom:16px;">
+                <span>0 (Info)</span>
+                <span>Faible ≥ @t.Low</span>
+                <span>Modéré ≥ @t.Moderate</span>
+                <span>Élevé ≥ @t.High</span>
+                <span>Critique ≥ @t.Critical</span>
+                <span>100</span>
+            </div>
+
+            <div class="grid-2">
+                <div class="field">
+                    <label class="field-label">Seuil Faible (Marquage corrélation) : <strong class="mono text-cyan">@t.Low</strong></label>
+                    <input type="range" class="range-slider" min="10" max="60" value="@t.Low"
+                           @oninput="e => UpdateThreshold(nameof(t.Low), e.Value)" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Seuil Modéré (Notification utilisateur) : <strong class="mono text-amber">@t.Moderate</strong></label>
+                    <input type="range" class="range-slider" min="20" max="75" value="@t.Moderate"
+                           @oninput="e => UpdateThreshold(nameof(t.Moderate), e.Value)" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Seuil Élevé (Alerte admin + décision) : <strong class="mono" style="color:var(--accent-orange);">@t.High</strong></label>
+                    <input type="range" class="range-slider" min="40" max="90" value="@t.High"
+                           @oninput="e => UpdateThreshold(nameof(t.High), e.Value)" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Seuil Critique (Blocage automatique réversible) : <strong class="mono text-crimson">@t.Critical</strong></label>
+                    <input type="range" class="range-slider" min="60" max="99" value="@t.Critical"
+                           @oninput="e => UpdateThreshold(nameof(t.Critical), e.Value)" />
+                </div>
+            </div>
+        </section>
+
+        <!-- 3. Collecteurs & Dossiers surveillés -->
+        <section class="card">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">Collecteurs &amp; Dossiers surveillés</h2>
+                    <p class="card-subtitle">Liste fermée de canaux de collecte respectant la vie privée (§2.1 — aucun keylogger, aucun contenu stocké)</p>
+                </div>
+            </div>
+
+            <div class="grid-2" style="margin-bottom:16px;">
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Surveillance du presse-papiers</div>
+                        <div class="field-hint">Détecte URLs suspectes et commandes copiées (seul le hash + domaine est conservé)</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.EnableClipboardMonitoring" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Dynamique de saisie (anti-BadUSB)</div>
+                        <div class="field-hint">Statistiques de rythme uniquement — aucune touche frappée enregistrée</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.EnableTypingRhythm" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Extension navigateur</div>
+                        <div class="field-hint">Domaines visités, liens cliqués, redirections et téléchargements</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.EnableBrowserMonitoring" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Surveillance réseau</div>
+                        <div class="field-hint">Connexions actives, résolutions DNS et anomalies de volume</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.EnableNetworkMonitoring" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+            </div>
+
+            <StringListEditor Label="Dossiers surveillés (FileSystemWatcher)"
+                              Placeholder="%USERPROFILE%\Downloads"
+                              Hint="Supporte les variables d'environnement Windows (%USERPROFILE%, %TEMP%…)."
+                              Items="_settings.WatchedFolders"
+                              OnChanged="MarkDirty" />
+        </section>
+
+        <!-- 4. Exclusions anti-faux-positifs -->
+        <section class="card">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">Exclusions anti-faux-positifs</h2>
+                    <p class="card-subtitle">Liste blanche appliquée dès le pré-filtre déterministe (§7.1, §9.4)</p>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <StringListEditor Label="Processus exclus" Placeholder="ex. devenv.exe"
+                                  Items="_settings.ExcludedProcesses" OnChanged="MarkDirty" />
+                <StringListEditor Label="Domaines de confiance" Placeholder="ex. entreprise.local"
+                                  Items="_settings.ExcludedDomains" OnChanged="MarkDirty" />
+                <StringListEditor Label="Hashes SHA-256 approuvés" Placeholder="Empreinte SHA-256 hexadécimale"
+                                  Items="_settings.ExcludedHashes" OnChanged="MarkDirty" />
+                <StringListEditor Label="Chemins exclus" Placeholder="ex. C:\OutilsInternes\"
+                                  Items="_settings.ExcludedPaths" OnChanged="MarkDirty" />
+            </div>
+        </section>
+
+        <!-- 5. IA Locale (Ollama) -->
+        <section class="card">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">IA locale (Ollama — 100 % hors ligne)</h2>
+                    <p class="card-subtitle">Appelé uniquement sur les événements dans la bande d'ambiguïté pour préserver les ressources (§7.1)</p>
+                </div>
+            </div>
+
+            <div class="toggle-row" style="margin-bottom:16px;">
+                <div>
+                    <div style="font-weight:600;">Activer le scoring contextuel par LLM local</div>
+                    <div class="field-hint">En cas de désactivation ou d'indisponibilité d'Ollama, le moteur bascule automatiquement sur les règles déterministes.</div>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" @bind="_settings.Llm.Enabled" @bind:after="MarkDirty" />
+                    <span class="switch-track"></span>
+                </label>
+            </div>
+
+            <div class="grid-3">
+                <div class="field">
+                    <label class="field-label">URL Ollama</label>
+                    <input class="input mono" @bind="_settings.Llm.Endpoint" @bind:after="MarkDirty" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Modèle de scoring</label>
+                    <input class="input mono" @bind="_settings.Llm.Model" @bind:after="MarkDirty" />
+                    <span class="field-hint">Recommandé : qwen2.5:7b ou qwen2.5:3b</span>
+                </div>
+                <div class="field">
+                    <label class="field-label">Modèle d'embeddings</label>
+                    <input class="input mono" @bind="_settings.Llm.EmbeddingModel" @bind:after="MarkDirty" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Bande d'ambiguïté — Bas : <strong class="mono">@_settings.Llm.AmbiguityLow</strong></label>
+                    <input type="range" class="range-slider" min="0" max="70" @bind="_settings.Llm.AmbiguityLow" @bind:after="MarkDirty" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Bande d'ambiguïté — Haut : <strong class="mono">@_settings.Llm.AmbiguityHigh</strong></label>
+                    <input type="range" class="range-slider" min="30" max="100" @bind="_settings.Llm.AmbiguityHigh" @bind:after="MarkDirty" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Timeout (secondes)</label>
+                    <input type="number" class="input mono" min="2" max="60" @bind="_settings.Llm.TimeoutSeconds" @bind:after="MarkDirty" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Confiance minimale (0 – 1)</label>
+                    <input type="number" class="input mono" step="0.05" min="0" max="1" @bind="_settings.Llm.MinConfidence" @bind:after="MarkDirty" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Appels simultanés max</label>
+                    <input type="number" class="input mono" min="1" max="8" @bind="_settings.Llm.MaxConcurrency" @bind:after="MarkDirty" />
+                </div>
+            </div>
+        </section>
+
+        <!-- 6. Moteur de corrélation -->
+        <section class="card">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">Moteur de corrélation (§8)</h2>
+                    <p class="card-subtitle">Fenêtres glissantes, décroissance exponentielle et escalade précoce au 2ᵉ événement</p>
+                </div>
+            </div>
+
+            <div class="grid-2" style="margin-bottom:16px;">
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Activer le moteur de corrélation</div>
+                        <div class="field-hint">Relie les signaux faibles en clusters et chaînes d'attaque</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.Correlation.Enabled" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Escalade précoce (2ᵉ événement similaire)</div>
+                        <div class="field-hint">Relève le niveau d'un cran dès la répétition d'un signal dans un même contexte (§8.2-5)</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.Correlation.EarlyEscalation" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="grid-3">
+                <div class="field">
+                    <label class="field-label">Fenêtre courte (min)</label>
+                    <input type="number" class="input mono" min="1" max="60" @bind="_settings.Correlation.ShortWindowMinutes" @bind:after="MarkDirty" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Fenêtre moyenne (min)</label>
+                    <input type="number" class="input mono" min="5" max="240" @bind="_settings.Correlation.MediumWindowMinutes" @bind:after="MarkDirty" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Fenêtre longue (heures)</label>
+                    <input type="number" class="input mono" min="1" max="168" @bind="_settings.Correlation.LongWindowHours" @bind:after="MarkDirty" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Score min d'entrée corrélation</label>
+                    <input type="number" class="input mono" min="0" max="90" @bind="_settings.Correlation.MinEventScore" @bind:after="MarkDirty" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Demi-vie décroissance (min)</label>
+                    <input type="number" class="input mono" step="1" min="1" max="240" @bind="_settings.Correlation.DecayHalfLifeMinutes" @bind:after="MarkDirty" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Poids même entité / même type</label>
+                    <div style="display:flex;gap:8px;">
+                        <input type="number" class="input mono" step="0.05" min="0.1" max="1" title="Même entité"
+                               @bind="_settings.Correlation.SameEntityWeight" @bind:after="MarkDirty" />
+                        <input type="number" class="input mono" step="0.05" min="0.05" max="1" title="Même type"
+                               @bind="_settings.Correlation.SameTypeWeight" @bind:after="MarkDirty" />
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 7. Rétention & Compte administrateur -->
+        <div class="grid-2">
+            <section class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Politique de rétention (§2.3)</h2>
+                        <p class="card-subtitle">Purge automatique des données au-delà de la durée configurée</p>
+                    </div>
+                </div>
+                <div class="stack-md">
+                    <div class="field">
+                        <label class="field-label">Rétention des événements bruts (jours)</label>
+                        <input type="number" class="input mono" min="7" max="730" @bind="_settings.EventRetentionDays" @bind:after="MarkDirty" />
+                        <span class="field-hint">Valeur recommandée par la documentation : 90 jours.</span>
+                    </div>
+                    <div class="field">
+                        <label class="field-label">Rétention des alertes &amp; incidents (jours)</label>
+                        <input type="number" class="input mono" min="30" max="1825" @bind="_settings.AlertRetentionDays" @bind:after="MarkDirty" />
+                        <span class="field-hint">Valeur recommandée : 365 jours (12 mois).</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Compte administrateur — Mot de passe</h2>
+                        <p class="card-subtitle">Confirmation par code TOTP obligatoire (§10.2)</p>
+                    </div>
+                </div>
+
+                <form @onsubmit="ChangePasswordAsync" class="stack-sm">
+                    <div class="field">
+                        <label class="field-label">Mot de passe actuel</label>
+                        <input type="password" class="input" @bind="_curPwd" required />
+                    </div>
+                    <div class="field">
+                        <label class="field-label">Nouveau mot de passe</label>
+                        <input type="password" class="input" @bind="_newPwd" required />
+                    </div>
+                    <div class="field">
+                        <label class="field-label">Confirmation</label>
+                        <input type="password" class="input" @bind="_confirmPwd" required />
+                    </div>
+                    <div class="field">
+                        <label class="field-label">Code TOTP (6 chiffres)</label>
+                        <input class="input mono" maxlength="6" inputmode="numeric" placeholder="000000" @bind="_pwdTotp" required />
+                    </div>
+                    <button type="submit" class="btn btn-amber" disabled="@_changingPwd" style="margin-top:4px;">
+                        @(_changingPwd ? "Mise à jour…" : "Modifier le mot de passe")
+                    </button>
+                </form>
+            </section>
+        </div>
+    </div>
+
+    @if (_dirty)
+    {
+        <div class="sticky-save-bar">
+            <div>
+                <strong style="color:var(--accent-cyan);">Modifications non enregistrées</strong>
+                <div class="text-secondary" style="font-size:12px;">Les nouveaux paramètres seront appliqués au serveur et diffusés aux agents.</div>
+            </div>
+            <div class="row-wrap">
+                <button type="button" class="btn" @onclick="LoadAsync" disabled="@_saving">Annuler</button>
+                <button type="button" class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">
+                    @(_saving ? "Enregistrement…" : "Enregistrer les modifications")
+                </button>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private SentinelSettings? _settings;
+    private bool _loading = true;
+    private bool _saving;
+    private bool _dirty;
+    private string? _error;
+
+    private string _curPwd = string.Empty;
+    private string _newPwd = string.Empty;
+    private string _confirmPwd = string.Empty;
+    private string _pwdTotp = string.Empty;
+    private bool _changingPwd;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _settings = await Api.GetSettingsAsync();
+            _dirty = false;
+        }
+        catch (SentinelApiException ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void MarkDirty() => _dirty = true;
+
+    private void SelectMode(OperatingMode mode)
+    {
+        if (_settings is null) return;
+        _settings.Mode = mode;
+        _dirty = true;
+    }
+
+    private void UpdateThreshold(string field, object? raw)
+    {
+        if (_settings is null || !int.TryParse(raw?.ToString(), out var v)) return;
+        var t = _settings.Thresholds;
+        switch (field)
+        {
+            case nameof(ThreatThresholds.Low):
+                t.Low = Math.Clamp(v, 5, Math.Max(5, t.Moderate - 5));
+                break;
+            case nameof(ThreatThresholds.Moderate):
+                t.Moderate = Math.Clamp(v, t.Low + 5, Math.Max(t.Low + 5, t.High - 5));
+                break;
+            case nameof(ThreatThresholds.High):
+                t.High = Math.Clamp(v, t.Moderate + 5, Math.Max(t.Moderate + 5, t.Critical - 5));
+                break;
+            case nameof(ThreatThresholds.Critical):
+                t.Critical = Math.Clamp(v, t.High + 5, 99);
+                break;
+        }
+        _dirty = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_settings is null) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            _settings = await Api.SaveSettingsAsync(_settings);
+            _dirty = false;
+            Toasts.Success("Paramètres enregistrés", "Configuration sauvegardée et appliquée au moteur SENTINEL.");
+        }
+        catch (SentinelApiException ex)
+        {
+            _error = ex.Message;
+            Toasts.Danger("Échec de l'enregistrement", ex.Message);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task ChangePasswordAsync()
+    {
+        if (_newPwd.Length < 10)
+        {
+            Toasts.Warning("Mot de passe trop court", "Utilisez au moins 10 caractères.");
+            return;
+        }
+        if (_newPwd != _confirmPwd)
+        {
+            Toasts.Warning("Confirmation invalide", "Les nouveaux mots de passe ne correspondent pas.");
+            return;
+        }
+        var totp = new string(_pwdTotp.Where(char.IsDigit).ToArray());
+        if (totp.Length != 6)
+        {
+            Toasts.Warning("Code TOTP invalide", "Saisissez le code à 6 chiffres.");
+            return;
+        }
+
+        _changingPwd = true;
+        try
+        {
+            await Api.ChangePasswordAsync(new ChangePasswordRequest(_curPwd, _newPwd, totp));
+            _curPwd = _newPwd = _confirmPwd = _pwdTotp = string.Empty;
+            Toasts.Success("Mot de passe modifié", "Votre nouveau mot de passe administrateur est actif.");
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Danger("Modification refusée", ex.Message);
+        }
+        finally
+        {
+            _changingPwd = false;
+        }
+    }
+}

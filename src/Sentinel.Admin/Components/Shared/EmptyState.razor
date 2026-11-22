@@ -1,0 +1,20 @@
+<div class="empty-state">
+    <div class="empty-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            <path d="M9 12l2 2 4-4" />
+        </svg>
+    </div>
+    <div style="font-size:15px;font-weight:700;color:var(--text-primary);">@Title</div>
+    @if (!string.IsNullOrWhiteSpace(Subtitle))
+    {
+        <div style="max-width:440px;font-size:13px;color:var(--text-secondary);">@Subtitle</div>
+    }
+    @ChildContent
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string? Subtitle { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

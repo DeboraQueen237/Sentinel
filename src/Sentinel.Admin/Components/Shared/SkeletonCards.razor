@@ -1,0 +1,14 @@
+<div class="kpi-grid" aria-busy="true" aria-label="Chargement en cours">
+    @for (var i = 0; i < Count; i++)
+    {
+        <div class="card" style="padding:18px;display:flex;flex-direction:column;gap:10px;">
+            <div class="skeleton" style="height:12px;width:55%;"></div>
+            <div class="skeleton" style="height:28px;width:40%;"></div>
+            <div class="skeleton" style="height:10px;width:75%;"></div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int Count { get; set; } = 4;
+}
