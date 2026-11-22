@@ -1,0 +1,218 @@
+[
+  {
+    "scenario": "1. Phishing → exécution",
+    "configuration": "A - Règles seules",
+    "detected": true,
+    "eventsBeforeAlert": 4,
+    "secondsToDetect": 42,
+    "peakScore": 91,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "2. BadUSB (HID → PowerShell)",
+    "configuration": "A - Règles seules",
+    "detected": true,
+    "eventsBeforeAlert": 3,
+    "secondsToDetect": 5,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "3. Ransomware simulé",
+    "configuration": "A - Règles seules",
+    "detected": true,
+    "eventsBeforeAlert": 4,
+    "secondsToDetect": 15,
+    "peakScore": 86,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "4. Exfiltration de données",
+    "configuration": "A - Règles seules",
+    "detected": true,
+    "eventsBeforeAlert": 4,
+    "secondsToDetect": 40,
+    "peakScore": 93,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "5. Brute force → intrusion",
+    "configuration": "A - Règles seules",
+    "detected": true,
+    "eventsBeforeAlert": 5,
+    "secondsToDetect": 32,
+    "peakScore": 93,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "6. Persistance",
+    "configuration": "A - Règles seules",
+    "detected": false,
+    "eventsBeforeAlert": 0,
+    "secondsToDetect": 0,
+    "peakScore": 64,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "7. Ingénierie sociale",
+    "configuration": "A - Règles seules",
+    "detected": true,
+    "eventsBeforeAlert": 4,
+    "secondsToDetect": 9,
+    "peakScore": 80,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "8. Fichier EICAR (IOC)",
+    "configuration": "A - Règles seules",
+    "detected": true,
+    "eventsBeforeAlert": 1,
+    "secondsToDetect": 0,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "1. Phishing → exécution",
+    "configuration": "B - Règles + IA",
+    "detected": true,
+    "eventsBeforeAlert": 3,
+    "secondsToDetect": 18,
+    "peakScore": 91,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "2. BadUSB (HID → PowerShell)",
+    "configuration": "B - Règles + IA",
+    "detected": true,
+    "eventsBeforeAlert": 3,
+    "secondsToDetect": 5,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "3. Ransomware simulé",
+    "configuration": "B - Règles + IA",
+    "detected": true,
+    "eventsBeforeAlert": 3,
+    "secondsToDetect": 9,
+    "peakScore": 86,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "4. Exfiltration de données",
+    "configuration": "B - Règles + IA",
+    "detected": true,
+    "eventsBeforeAlert": 3,
+    "secondsToDetect": 26,
+    "peakScore": 93,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "5. Brute force → intrusion",
+    "configuration": "B - Règles + IA",
+    "detected": true,
+    "eventsBeforeAlert": 3,
+    "secondsToDetect": 16,
+    "peakScore": 93,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "6. Persistance",
+    "configuration": "B - Règles + IA",
+    "detected": true,
+    "eventsBeforeAlert": 3,
+    "secondsToDetect": 32,
+    "peakScore": 79,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "7. Ingénierie sociale",
+    "configuration": "B - Règles + IA",
+    "detected": true,
+    "eventsBeforeAlert": 3,
+    "secondsToDetect": 5,
+    "peakScore": 88,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "8. Fichier EICAR (IOC)",
+    "configuration": "B - Règles + IA",
+    "detected": true,
+    "eventsBeforeAlert": 1,
+    "secondsToDetect": 0,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "1. Phishing → exécution",
+    "configuration": "C - Règles + IA + Corrélation",
+    "detected": true,
+    "eventsBeforeAlert": 2,
+    "secondsToDetect": 6,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "2. BadUSB (HID → PowerShell)",
+    "configuration": "C - Règles + IA + Corrélation",
+    "detected": true,
+    "eventsBeforeAlert": 2,
+    "secondsToDetect": 2,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "3. Ransomware simulé",
+    "configuration": "C - Règles + IA + Corrélation",
+    "detected": true,
+    "eventsBeforeAlert": 2,
+    "secondsToDetect": 4,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "4. Exfiltration de données",
+    "configuration": "C - Règles + IA + Corrélation",
+    "detected": true,
+    "eventsBeforeAlert": 2,
+    "secondsToDetect": 12,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "5. Brute force → intrusion",
+    "configuration": "C - Règles + IA + Corrélation",
+    "detected": true,
+    "eventsBeforeAlert": 2,
+    "secondsToDetect": 8,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "6. Persistance",
+    "configuration": "C - Règles + IA + Corrélation",
+    "detected": true,
+    "eventsBeforeAlert": 2,
+    "secondsToDetect": 15,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "7. Ingénierie sociale",
+    "configuration": "C - Règles + IA + Corrélation",
+    "detected": true,
+    "eventsBeforeAlert": 2,
+    "secondsToDetect": 3,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "8. Fichier EICAR (IOC)",
+    "configuration": "C - Règles + IA + Corrélation",
+    "detected": true,
+    "eventsBeforeAlert": 1,
+    "secondsToDetect": 0,
+    "peakScore": 100,
+    "falsePositives": 0
+  }
+]
