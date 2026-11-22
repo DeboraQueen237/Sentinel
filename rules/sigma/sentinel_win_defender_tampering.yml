@@ -1,0 +1,41 @@
+# License: MIT — Original rule authored for SENTINEL v2
+title: Microsoft Defender Disabling or Exclusion Tampering
+id: 6a100010-5e77-4b21-9c10-000000000010
+status: stable
+description: Detects attempts to disable Microsoft Defender real-time protection, stop the WinDefend service, or add suspicious Defender exclusions via PowerShell or Defender events.
+author: Sentinel Project Contributors
+license: MIT
+date: 2026-01-15
+logsource:
+    product: windows
+detection:
+    selection_ps_cmdlet:
+        CommandLine|contains:
+            - 'Set-MpPreference'
+            - 'Add-MpPreference'
+    selection_ps_flags:
+        CommandLine|contains|windash:
+            - '-DisableRealtimeMonitoring'
+            - '-DisableBehaviorMonitoring'
+            - '-DisableIOAVProtection'
+            - '-DisableScriptScanning'
+            - '-DisableBlockAtFirstSeen'
+            - '-ExclusionPath'
+            - '-ExclusionProcess'
+            - '-ExclusionExtension'
+    selection_service_stop:
+        CommandLine|contains|all:
+            - 'stop'
+            - 'WinDefend'
+    selection_defender_tamper_event:
+        EventID:
+            - '5001'
+            - '5007'
+    condition: (selection_ps_cmdlet and selection_ps_flags) or selection_service_stop or selection_defender_tamper_event
+falsepositives:
+    - Authorized IT administrators configuring enterprise antivirus exclusions during deployment
+level: critical
+tags:
+    - attack.defense_evasion
+    - attack.t1562
+    - attack.t1562.001
