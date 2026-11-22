@@ -86,6 +86,7 @@ internal static class AlertEndpoints
             await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
             var alert = await db.Alerts
                 .AsNoTracking()
+                .AsSplitQuery()
                 .Include(a => a.AlertEvents)
                 .Include(a => a.History)
                 .FirstOrDefaultAsync(a => a.Id == id, ct)
@@ -150,6 +151,7 @@ internal static class AlertEndpoints
 
             await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
             var alert = await db.Alerts
+                .AsSplitQuery()
                 .Include(a => a.AlertEvents)
                 .Include(a => a.History)
                 .FirstOrDefaultAsync(a => a.Id == id, ct)
@@ -241,6 +243,7 @@ internal static class AlertEndpoints
 
             await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
             var alert = await db.Alerts
+                .AsSplitQuery()
                 .Include(a => a.AlertEvents)
                 .Include(a => a.History)
                 .FirstOrDefaultAsync(a => a.Id == id, ct)
