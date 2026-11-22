@@ -24,9 +24,17 @@ public sealed class CorrelationEngine
     private readonly Dictionary<Guid, CorrelatedNode> _nodes = new();
     private readonly Dictionary<string, List<Guid>> _keyIndex = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, MutableCluster> _clusters = new();
+    private readonly AttackChainMarkovModel _markov;
 
     private DateTimeOffset _latestTimestamp = DateTimeOffset.MinValue;
     private int _insertionsSinceCleanup;
+
+    public CorrelationEngine(AttackChainMarkovModel? markov = null)
+    {
+        _markov = markov ?? new AttackChainMarkovModel();
+    }
+
+    public AttackChainMarkovModel MarkovModel => _markov;
 
     public int ActiveClusterCount
     {
@@ -130,7 +138,10 @@ public sealed class CorrelationEngine
                     inspected++;
                     var edgeType = ResolveEdgeType(neighbor, node, keyInfo);
                     var weight = keyInfo.IsEntityKey ? cfg.SameEntityWeight : cfg.SameTypeWeight;
-                    var link = new CorrelationLink(neighbor.Id, node.Id, edgeType, weight, keyInfo.Key);
+                    var link = new CorrelationLink(neighbor.Id, node.Id, edgeType, weight, keyInfo.Key)
+                    {
+                        ObservedAt = node.Timestamp
+                    };
 
                     if (!matchedNeighbors.TryGetValue(neighborId, out var existing) || link.Weight > existing.BestLink.Weight)
                     {
@@ -304,7 +315,7 @@ public sealed class CorrelationEngine
         if (node.Timestamp > cluster.LastSeen) cluster.LastSeen = node.Timestamp;
     }
 
-    private static CorrelationCluster RecomputeClusterSnapshot(MutableCluster cluster, SentinelSettings settings)
+    private CorrelationCluster RecomputeClusterSnapshot(MutableCluster cluster, SentinelSettings settings)
     {
         var cfg = settings.Correlation;
         var thresholds = settings.Thresholds;
@@ -349,9 +360,12 @@ public sealed class CorrelationEngine
             contributionSum += n.Assessment.Score * linkWeight * timeFactor;
         }
 
-        // Détection des 7 chaînes d'attaque modélisées (§8.3)
+        // Détection des 7 chaînes d'attaque modélisées (§8.3) + modèle probabiliste Markov (v2 M8)
         var chainMatch = AttackChainMatcher.MatchBest(orderedNodes);
-        var sequenceBonus = chainMatch?.Bonus ?? 0;
+        var categorySequence = orderedNodes.Select(n => n.Event.Category).ToArray();
+        var chainProbability = _markov.EstimateChainProbability(categorySequence);
+        var markovBonus = _markov.ComputeSequenceBonus(chainProbability, orderedNodes.Count, chainMatch is not null);
+        var sequenceBonus = (chainMatch?.Bonus ?? 0) + markovBonus;
 
         var formulaScore = Math.Clamp((int)Math.Round(maxEventScore + contributionSum + sequenceBonus), 0, 100);
         var baseLevel = thresholds.LevelOf(formulaScore);
@@ -378,6 +392,9 @@ public sealed class CorrelationEngine
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+        var tactics = ClusterNarrativeBuilder.ExtractMitreTactics(mitre);
+        var contributions = ClusterNarrativeBuilder.AggregateContributions(orderedNodes, chainMatch, chainProbability, markovBonus);
+
         var contextKeys = cluster.SharedKeys
             .Select(FormatDisplayKey)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -392,6 +409,15 @@ public sealed class CorrelationEngine
             finalLevel,
             chainMatch,
             contextKeys,
+            escalated);
+
+        var narrative = ClusterNarrativeBuilder.BuildNarrative(
+            cluster.HostId,
+            orderedNodes,
+            chainMatch,
+            chainProbability,
+            tactics,
+            finalScore,
             escalated);
 
         return new CorrelationCluster
@@ -410,7 +436,11 @@ public sealed class CorrelationEngine
             Escalated = escalated,
             MaxEventScore = maxEventScore,
             Justification = justification,
-            MitreTechniques = mitre
+            MitreTechniques = mitre,
+            MitreTactics = tactics,
+            Narrative = narrative,
+            ChainProbability = chainProbability,
+            ScoreContributions = contributions
         };
     }
 

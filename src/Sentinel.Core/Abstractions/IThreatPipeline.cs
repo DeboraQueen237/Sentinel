@@ -22,6 +22,12 @@ public interface IThreatPipeline
     /// <summary>Retour analyste (faux positif ⇒ baseline + liste d'exclusion apprise, doc §9.4).</summary>
     void ApplyFeedback(AnalystFeedback feedback);
 
+    /// <summary>Historique des retours analyste (v2 M8, réversibles).</summary>
+    IReadOnlyList<FeedbackHistoryEntryDto> GetFeedbackHistory() => Array.Empty<FeedbackHistoryEntryDto>();
+
+    /// <summary>Annule un retour analyste précédemment appliqué sur le modèle de corrélation (v2 M8).</summary>
+    bool RevertFeedback(Guid feedbackId) => false;
+
     /// <summary>Clusters actifs (fenêtre longue) éventuellement filtrés par poste.</summary>
     IReadOnlyList<CorrelationCluster> GetActiveClusters(string? hostId = null);
 
