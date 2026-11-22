@@ -16,8 +16,17 @@ public static class SentinelPaths
             var root = !string.IsNullOrWhiteSpace(env)
                 ? Environment.ExpandEnvironmentVariables(env)
                 : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Sentinel");
-            Directory.CreateDirectory(root);
-            return root;
+            try
+            {
+                Directory.CreateDirectory(root);
+                return root;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                var fallback = Path.Combine(Path.GetTempPath(), "Sentinel");
+                Directory.CreateDirectory(fallback);
+                return fallback;
+            }
         }
     }
 

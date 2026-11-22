@@ -178,6 +178,7 @@ app.MapHostEntityEndpoints();
 app.MapReportEndpoints();
 app.MapSettingsEndpoints();
 app.MapAuditEndpoints();
+app.MapV2DetectionEndpoints();
 
 app.Run();
 

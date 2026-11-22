@@ -1,7 +1,10 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Sentinel.Core.Abstractions;
+using Sentinel.Shared.Infrastructure;
 using Sentinel.Shared.Json;
 using Sentinel.Shared.Models;
+using Sentinel.Shared.Security;
 using Sentinel.Storage;
 using Sentinel.Storage.Entities;
 using Sentinel.Storage.Mapping;
@@ -21,22 +24,35 @@ public sealed class StartupInitializationService : IHostedService
     private readonly SentinelDbInitializer _dbInitializer;
     private readonly IDbContextFactory<SentinelDbContext> _dbFactory;
     private readonly IThreatPipeline _pipeline;
+    private readonly IHostEnvironment _environment;
     private readonly ILogger<StartupInitializationService> _logger;
 
     public StartupInitializationService(
         SentinelDbInitializer dbInitializer,
         IDbContextFactory<SentinelDbContext> dbFactory,
         IThreatPipeline pipeline,
+        IHostEnvironment environment,
         ILogger<StartupInitializationService> logger)
     {
         _dbInitializer = dbInitializer;
         _dbFactory = dbFactory;
         _pipeline = pipeline;
+        _environment = environment;
         _logger = logger;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        // 0. Durcissement NTFS des répertoires de données (hors environnement Testing)
+        if (!_environment.IsEnvironment("Testing"))
+        {
+            var acl = DirectorySecurityHardener.HardenDirectory(SentinelPaths.Root);
+            if (acl.Applied)
+                _logger.LogInformation("Durcissement NTFS appliqué sur {Path} : {Message}", acl.Path, acl.Message);
+            else
+                _logger.LogDebug("Durcissement NTFS non appliqué sur {Path} : {Message}", acl.Path, acl.Message);
+        }
+
         // 1. Base de données
         await _dbInitializer.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
