@@ -1,7 +1,10 @@
 using Microsoft.Extensions.Logging;
 using Sentinel.AI;
 using Sentinel.Core.Abstractions;
+using Sentinel.Detection.Sigma;
+using Sentinel.ML;
 using Sentinel.Shared.Models;
+using Sentinel.ThreatIntel;
 
 namespace Sentinel.Core;
 
@@ -15,7 +18,10 @@ public static class ThreatPipelineFactory
         SentinelSettings settings,
         ILlmAssessor? llm = null,
         ILoggerFactory? loggerFactory = null,
-        TimeProvider? clock = null)
+        TimeProvider? clock = null,
+        ISigmaEngine? sigma = null,
+        IReputationService? threatIntel = null,
+        IPeMlClassifier? mlClassifier = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -25,6 +31,6 @@ public static class ThreatPipelineFactory
             logger: loggerFactory?.CreateLogger<OllamaAssessor>(),
             clock: clock);
 
-        return new ThreatPipeline(settings, effectiveLlm, loggerFactory, clock);
+        return new ThreatPipeline(settings, effectiveLlm, loggerFactory, clock, sigma, threatIntel, mlClassifier);
     }
 }
