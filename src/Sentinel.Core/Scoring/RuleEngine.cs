@@ -64,6 +64,21 @@ public sealed class RuleEngine
             case EventCategory.System:
                 EvaluateSystem(enriched, matches);
                 break;
+            case EventCategory.Defender:
+                EvaluateDefender(enriched, matches);
+                break;
+            case EventCategory.Script:
+                EvaluateScript(enriched, matches);
+                break;
+            case EventCategory.Canary:
+                EvaluateCanary(enriched, matches);
+                break;
+            case EventCategory.StaticAnalysis:
+                EvaluateStaticAnalysis(enriched, matches);
+                break;
+            case EventCategory.ThreatIntel:
+                EvaluateThreatIntel(enriched, matches);
+                break;
         }
 
         if (matches.Count == 0)
@@ -653,5 +668,173 @@ public sealed class RuleEngine
                 }
                 break;
         }
+    }
+
+    private static void EvaluateDefender(EnrichedEvent e, List<RuleMatch> matches)
+    {
+        var evt = e.Event;
+        var threatName = evt.Attr(AttributeKeys.DefenderThreatName) ?? evt.Subject;
+        var severity = evt.Attr(AttributeKeys.DefenderSeverity) ?? "High";
+        var status = evt.Attr(AttributeKeys.DefenderStatus) ?? string.Empty;
+
+        switch (evt.EventType)
+        {
+            case EventTypes.DefenderThreatDetected:
+                var detWeight = severity.Equals("Severe", StringComparison.OrdinalIgnoreCase) ||
+                                status.Equals("ActionFailed", StringComparison.OrdinalIgnoreCase)
+                    ? 94 : 88;
+                matches.Add(new RuleMatch(
+                    "DEF-THREAT-DETECTED", detWeight, ThreatType.Malware, ["T1204.002"],
+                    $"Microsoft Defender a détecté la menace « {threatName} » (gravité {severity})"));
+                break;
+
+            case EventTypes.DefenderActionTaken:
+                matches.Add(new RuleMatch(
+                    "DEF-ACTION-TAKEN", 65, ThreatType.Malware, ["T1204.002"],
+                    $"Microsoft Defender a appliqué une action ({evt.Attr(AttributeKeys.DefenderAction) ?? "remédiation"}) sur « {threatName} »"));
+                break;
+
+            case EventTypes.DefenderRealtimeDisabled:
+                matches.Add(new RuleMatch(
+                    "DEF-REALTIME-DISABLED", 92, ThreatType.Tampering, ["T1562.001"],
+                    "Affaiblissement critique : protection temps réel Microsoft Defender désactivée"));
+                break;
+
+            case EventTypes.DefenderExclusionAdded:
+                matches.Add(new RuleMatch(
+                    "DEF-EXCLUSION-ADDED", 86, ThreatType.Tampering, ["T1562.001"],
+                    $"Affaiblissement Defender : ajout d'une exclusion ({evt.Attr(AttributeKeys.DefenderExclusion) ?? evt.Subject})"));
+                break;
+
+            case EventTypes.DefenderServiceStopped:
+                matches.Add(new RuleMatch(
+                    "DEF-SERVICE-STOPPED", 94, ThreatType.Tampering, ["T1562.001"],
+                    "Affaiblissement critique : service Microsoft Defender (WinDefend) arrêté"));
+                break;
+
+            case EventTypes.DefenderTampering:
+                matches.Add(new RuleMatch(
+                    "DEF-TAMPERING", 90, ThreatType.Tampering, ["T1562.001"],
+                    $"Tentative d'affaiblissement de Microsoft Defender ({evt.Attr(AttributeKeys.Reason) ?? evt.Subject})"));
+                break;
+        }
+    }
+
+    private static void EvaluateCanary(EnrichedEvent e, List<RuleMatch> matches)
+    {
+        var evt = e.Event;
+        var isEncrypted = evt.EventType == EventTypes.CanaryEncrypted || (evt.AttrDouble(AttributeKeys.Entropy) is >= 7.2);
+        var weight = isEncrypted ? 98 : 94;
+        matches.Add(new RuleMatch(
+            isEncrypted ? "CANARY-ENCRYPTED" : "CANARY-TAMPERED",
+            weight,
+            ThreatType.Ransomware,
+            ["T1486"],
+            evt.Attr(AttributeKeys.Reason) ?? $"Fichier canari anti-ransomware touché ({evt.EventType} : {evt.Subject})"));
+    }
+
+    private static void EvaluateScript(EnrichedEvent e, List<RuleMatch> matches)
+    {
+        var evt = e.Event;
+        var indicators = evt.Attr(AttributeKeys.ScriptIndicators) ?? string.Empty;
+
+        if (evt.EventType == EventTypes.ScriptLoggingBypass ||
+            indicators.Contains("LoggingOrDefenseBypass", StringComparison.OrdinalIgnoreCase))
+        {
+            matches.Add(new RuleMatch(
+                "SCRIPT-LOGGING-BYPASS", 88, ThreatType.Tampering, ["T1562.006", "T1059.001"],
+                $"Tentative de contournement de la journalisation ou de la protection script ({evt.Subject})"));
+        }
+
+        if (indicators.Contains("RecoveryOrCredentialAbuse", StringComparison.OrdinalIgnoreCase))
+        {
+            matches.Add(new RuleMatch(
+                "SCRIPT-RECOVERY-CRED-ABUSE", 86, ThreatType.Ransomware, ["T1490", "T1003"],
+                $"Script tentant d'inhiber la restauration système ou d'accéder aux identifiants ({evt.Subject})"));
+        }
+
+        if (indicators.Contains("DownloadAndExecute", StringComparison.OrdinalIgnoreCase))
+        {
+            matches.Add(new RuleMatch(
+                "SCRIPT-DOWNLOAD-EXEC", 74, ThreatType.Malware, ["T1059.001", "T1105"],
+                $"Bloc de script PowerShell avec téléchargement et exécution en mémoire ({evt.Subject})"));
+        }
+
+        if (indicators.Contains("EncodedCommand", StringComparison.OrdinalIgnoreCase))
+        {
+            matches.Add(new RuleMatch(
+                "SCRIPT-ENCODED-BLOCK", 64, ThreatType.Malware, ["T1059.001", "T1027", "T1140"],
+                $"Bloc de script PowerShell encodé détecté ({evt.Subject})"));
+        }
+
+        if (indicators.Contains("HighObfuscation", StringComparison.OrdinalIgnoreCase))
+        {
+            matches.Add(new RuleMatch(
+                "SCRIPT-HIGH-OBFUSCATION", 56, ThreatType.Malware, ["T1027", "T1059.001"],
+                $"Bloc de script fortement obfusqué (score {evt.Attr(AttributeKeys.ScriptObfuscationScore) ?? "?"})"));
+        }
+        else if (matches.Count == 0 && indicators.Contains("RemoteDownload", StringComparison.OrdinalIgnoreCase))
+        {
+            matches.Add(new RuleMatch(
+                "SCRIPT-REMOTE-DOWNLOAD", 44, ThreatType.Malware, ["T1105", "T1059.001"],
+                $"Téléchargement distant dans un bloc de script PowerShell ({evt.Subject})"));
+        }
+    }
+
+    private static void EvaluateStaticAnalysis(EnrichedEvent e, List<RuleMatch> matches)
+    {
+        var evt = e.Event;
+        if (evt.EventType == EventTypes.YaraMatch)
+        {
+            var rule = evt.Attr(AttributeKeys.YaraRule) ?? "YARA";
+            var weight = rule.Contains("EICAR", StringComparison.OrdinalIgnoreCase) ? 95 : 86;
+            matches.Add(new RuleMatch(
+                $"YARA-{rule}", weight, ThreatType.Malware, ["T1204.002", "T1027"],
+                $"Correspondance règle YARA « {rule} » sur {evt.Attr(AttributeKeys.FilePath) ?? evt.Subject}"));
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.Attr(AttributeKeys.PePacker)))
+        {
+            matches.Add(new RuleMatch(
+                "PE-PACKER-DETECTED", 46, ThreatType.Malware, ["T1027.002"],
+                $"Exécutable PE probablement empaqueté ({evt.Attr(AttributeKeys.PePacker)})"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.Attr(AttributeKeys.PeSuspiciousImports)))
+        {
+            matches.Add(new RuleMatch(
+                "PE-SUSPICIOUS-IMPORTS", 52, ThreatType.Malware, ["T1055", "T1204.002"],
+                $"Imports PE suspects détectés ({evt.Attr(AttributeKeys.PeSuspiciousImports)})"));
+        }
+
+        if (evt.AttrDouble(AttributeKeys.PeMaxEntropy) is >= 7.2)
+        {
+            matches.Add(new RuleMatch(
+                "PE-HIGH-SECTION-ENTROPY", 42, ThreatType.Malware, ["T1027.002"],
+                $"Entropie de section PE élevée ({evt.Attr(AttributeKeys.PeMaxEntropy)} bits/octet)"));
+        }
+    }
+
+    private static void EvaluateThreatIntel(EnrichedEvent e, List<RuleMatch> matches)
+    {
+        var evt = e.Event;
+        var source = evt.Attr(AttributeKeys.ThreatIntelSource) ?? "ThreatIntel";
+        var indicator = evt.Attr(AttributeKeys.ThreatIntelIndicator) ?? evt.Subject;
+        var threat = evt.Attr(AttributeKeys.ThreatIntelThreat) ?? "indicateur malveillant";
+        var firstSeen = evt.Attr(AttributeKeys.ThreatIntelFirstSeen);
+        var indType = evt.Attr(AttributeKeys.ThreatIntelIndicatorType) ?? "ioc";
+
+        var threatType = threat.Contains("phish", StringComparison.OrdinalIgnoreCase)
+            ? ThreatType.Phishing
+            : ThreatType.Malware;
+
+        var dateSuffix = string.IsNullOrWhiteSpace(firstSeen) ? string.Empty : $" le {firstSeen}";
+        matches.Add(new RuleMatch(
+            $"TI-{source.ToUpperInvariant()}",
+            92,
+            threatType,
+            threatType == ThreatType.Phishing ? ["T1566.002", "T1071"] : ["T1071", "T1105"],
+            $"Indicateur ({indType}) « {indicator} » listé par {source}{dateSuffix} ({threat})"));
     }
 }

@@ -26,6 +26,7 @@ public sealed class AgentEventPipeline : BackgroundService, IEventSink
     private readonly Channel<SecurityEvent> _channel;
     private readonly SqliteEventOutbox _outbox;
     private readonly AgentStateStore _stateStore;
+    private readonly EventDeduplicator _deduplicator;
     private readonly ILogger<AgentEventPipeline> _logger;
     private readonly SemaphoreSlim _outboxReadySignal = new(0, int.MaxValue);
 
@@ -36,10 +37,12 @@ public sealed class AgentEventPipeline : BackgroundService, IEventSink
         SqliteEventOutbox outbox,
         AgentStateStore stateStore,
         IOptions<AgentOptions> options,
-        ILogger<AgentEventPipeline> logger)
+        ILogger<AgentEventPipeline> logger,
+        EventDeduplicator? deduplicator = null)
     {
         _outbox = outbox;
         _stateStore = stateStore;
+        _deduplicator = deduplicator ?? new EventDeduplicator();
         _logger = logger;
 
         var capacity = Math.Clamp(options.Value.ChannelCapacity, 256, 65_536);
@@ -117,10 +120,14 @@ public sealed class AgentEventPipeline : BackgroundService, IEventSink
 
                 try
                 {
-                    _outbox.EnqueueBatch(buffer);
-                    if (_outboxReadySignal.CurrentCount == 0)
+                    var deduplicated = _deduplicator.DeduplicateBatch(buffer);
+                    if (deduplicated.Count > 0)
                     {
-                        _outboxReadySignal.Release();
+                        _outbox.EnqueueBatch(deduplicated);
+                        if (_outboxReadySignal.CurrentCount == 0)
+                        {
+                            _outboxReadySignal.Release();
+                        }
                     }
                 }
                 catch (Exception ex)
