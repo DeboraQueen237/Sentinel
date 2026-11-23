@@ -163,20 +163,27 @@ internal sealed class OllamaHealthMonitorService : BackgroundService
         }
 
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
-        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+        try
         {
-            try
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
             {
-                await _llm.CheckHealthAsync(stoppingToken).ConfigureAwait(false);
+                try
+                {
+                    await _llm.CheckHealthAsync(stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Vérification périodique d'Ollama échouée.");
+                }
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Vérification périodique d'Ollama échouée.");
-            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Arrêt normal du service
         }
     }
 }
