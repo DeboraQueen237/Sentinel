@@ -4,23 +4,29 @@ Toutes les évolutions notables de **SENTINEL** sont consignées ici selon le fo
 
 ---
 
-## [2.0.0] — En cours de développement (`develop`)
+## [2.0.0] — 2026-11-23 (`develop`)
 
-### Planification & Gouvernance
-- Audit complet v1 → v2 et plan d'architecture détaillé dans `docs/v2-plan.md`.
-- Ajout de `THIRD_PARTY_NOTICES.md` (licences vérifiées de toutes les dépendances, flux de renseignement, règles et outils) et de `SECURITY.md`.
-- Adaptation du modèle Ollama local par défaut à `qwen2.5-coder:3b` (modèle installé sur le poste cible).
+### Ajouté
+- **Mission 1 — Microsoft Defender, Sysmon optionnel & dédoublonnage** (`Sentinel.Agent`, `Sentinel.Core`) : collecte WMI (`MSFT_Mp*`) et `Windows Defender/Operational` (détections + affaiblissement : exclusions, arrêt temps réel/service), détection automatique de Sysmon sans jamais l'embarquer, dédoublonnage multi-sources (`EventDeduplicator`).
+- **Mission 2 — Moteur Sigma natif C#** (`Sentinel.Detection.Sigma`) : parseur YAML (`YamlDotNet`), conditions complètes (`and/or/not`, `1 of`, `all of`), modificateurs (`contains`, `startswith`, `endswith`, `re`, `all`, `windash`, `base64`), pré-filtrage Aho-Corasick, rechargement à chaud, 14 règles MIT incluses (`rules/sigma/`), script `scripts/update-sigma-rules.ps1` (SigmaHQ DRL 1.1), 55 cas de test et benchmark 1 000 règles × 10 000 événements (~4 s).
+- **Mission 3 — Moteur YARA & Analyse statique PE** (`Sentinel.Detection.Static`, `Sentinel.Agent`) : `dnYara` sécurisé par `NativeLibrary.TryLoad` + `ManagedYaraFallbackEngine` documenté, analyseur PE `PeNet` (Authenticode, sections/entropie, imports suspects, packers, horodatage), 9 règles YARA MIT (`rules/yara/`), scan événementiel/planifié/à la demande avec limites strictes de ressources.
+- **Mission 4 — Threat Intelligence locale hors-ligne** (`Sentinel.ThreatIntel`) : clients HTTP Polly v8 pour abuse.ch (MalwareBazaar, ThreatFox, URLhaus, Feodo Tracker en CC0), OpenPhish/PhishTank opt-in, VirusTotal on-demand par hash ; SQLite indexé + filtre de Bloom (`< 2 ms` hors-ligne).
+- **Mission 5 — Classifieur ML de fichiers PE** (`Sentinel.ML`, `Sentinel.ML.Trainer`) : 51 caractéristiques EMBER-like (`PeNet`), entraîneur `FastTreeBinaryTrainer` (ROC-AUC, Recall @ 0,1 % FPR), score borné (≤ 35/100, jamais seul décisif), explicabilité `CalculateFeatureContribution`, rapport `docs/ml-evaluation.md`.
+- **Mission 6 — Fichiers canari anti-ransomware** (`Sentinel.Agent`) : déploiement discret de fichiers leurres avec SHA-256 (`CanaryManager`/`CanaryCollector`), détection modification/renommage/chiffrement/suppression → réponse critique réversible.
+- **Mission 7 — Visibilité scripts non invasive** (`Sentinel.Agent`) : PowerShell Script Block Logging Event ID `4104` + ETW AMSI optionnel (sans fournisseur AMSI COM managé), métadonnées/hash par défaut, caviardage automatique des secrets sur extrait opt-in, script `scripts/enable-script-logging.ps1`.
+- **Mission 8 — Corrélation avancée & fusion multi-moteurs** (`Sentinel.Core`) : modèle de transitions de Markov (`AttackChainMarkovModel`), feedback VP/FP historisé et réversible, arêtes horodatées, tactiques MITRE, récit chronologique (`ClusterNarrativeBuilder`), ventilation `ScoreContributions`, escalade au 2ᵉ événement préservée.
+- **Mission 9 — Auto-protection & durcissement** : verrouillage brute-force admin (5 échecs → 15 min, HTTP `429`), durcissement ACL NTFS (`DirectorySecurityHardener`, `SYSTEM` + `Administrateurs` en mode élevé/service), `.AsSplitQuery()` EF Core, Watchdog avec détection de suppression de service, `EnableNETAnalyzers`, 0 vulnérabilité NuGet connue (`System.Security.Cryptography.Pkcs` épinglé `10.0.15`), test automatisé de confidentialité de `sentinel.db`.
+- **Mission 10 — Évaluation reproductible & rapport honnête** (`Sentinel.Simulation`, `docs/evaluation-report.md`) : 11 scénarios (v1+v2), corpus bénin 24 h (459 événements), mesures A/B/C déterministes et en direct contre Ollama local `qwen2.5-coder:3b` (`-55,0 %` TTD, `0,00 %` FPR), script VM-only `scripts/run-atomic-red-team-vm.ps1`.
+- **Mission 11 — Console Blazor v2 bilingue FR/EN** (`Sentinel.Admin`) : 5 nouveaux écrans (`/intel`, `/rules`, `/ml`, `/canaries`, `/health`), graphe enrichi (filtre tactique MITRE, récit, ventilation moteurs, Annuler 1 clic), interrupteurs v2, sélecteur FR/EN, vérifié en direct dans Chrome (0 erreur console/réseau).
+- **Mission 12 — Documentation complète synchronisée** : mise à jour de `README.md` et tous les guides `docs/` (`architecture`, `detection-sources`, `correlation-rules`, `decision-matrix`, `privacy-and-consent`, `threat-model`, `test-plan`, `admin-guide`, `user-guide`, `install-guide`, `limitations`), `THIRD_PARTY_NOTICES.md`, `SECURITY.md`, documentation XML générée sur les bibliothèques.
+- **Mission 13 — Installateur Windows x64 MSI WiX v5 & scripts de build** : projet `Sentinel.Installer.Msi` (WiX v5), mise à niveau `Sentinel.Installer` v2 (détection Defender/Sysmon/Ollama+RAM, ACL NTFS, pare-feu, règles, désinstallation `--delete-data`), `build/build.ps1`, `build/sign.ps1` et CI release sur tags `v*`.
+
+### Modifié
+- Modèle Ollama local par défaut adapté à `qwen2.5-coder:3b` (modèle installé localement).
 
 ---
 
 ## [1.0.0] — 2026-11-22 (`main`)
 
 ### Ajouté
-- **Socle partagé (`Sentinel.Shared`)** : schéma normalisé `SecurityEvent` / `ThreatAssessment`, catalogue `MitreCatalog`, contrats REST/SignalR/gRPC/IPC, PKI locale ECDSA P-256 (`SentinelPki`), protection DPAPI (`SecretProtector`), chaîne de hachage SHA-256 (`HashChain`).
-- **IA locale (`Sentinel.AI`)** : client HTTP Ollama local avec confinement anti prompt-injection (`<donnees_non_fiables>`), validation stricte JSON, concurrence bornée et backoff exponentiel.
-- **Cœur d'analyse (`Sentinel.Core`)** : pré-filtre déterministe, 44 règles nommées MITRE ATT&CK, baseline comportementale Welford, scoring hybride, moteur de corrélation en graphe (7 chaînes d'attaque, escalade au 2ᵉ événement), moteur de décision graduée (niveaux 0–4, modes `Learning`/`Simulation`/`Active`).
-- **Stockage (`Sentinel.Storage`)** : EF Core 10 SQLite WAL (14 entités), écriture chaînée SHA-256 (`HashChainWriter`), vérification d'intégrité (`IntegrityVerifier`), purge automatique 90 j / 365 j (`RetentionCleaner`).
-- **Serveur (`Sentinel.Server`)** : API REST + SignalR (`:5180`), gRPC mTLS (`:5181`), authentification admin PBKDF2 + 2FA TOTP, constructeur de graphe, rapports QuestPDF et JSON.
-- **Composants poste** : `Sentinel.Agent` (6 collecteurs système, outbox SQLite, actions réversibles + quarantaine AES-256-GCM), `Sentinel.Tray` (presse-papiers sans texte brut, rythme de frappe sans touches), `Sentinel.BrowserHost`, `extension/` (Chrome/Edge MV3), `Sentinel.Watchdog`, `Sentinel.Installer` (écran de consentement explicite).
-- **Console d'administration (`Sentinel.Admin`)** : Blazor Server sombre/clair responsive avec Cytoscape.js et Chart.js locaux.
-- **Évaluation & Tests** : 70 tests unitaires/intégration verts et banc comparatif A vs B vs C (`Sentinel.Simulation`).
+- Socle complet SENTINEL v1 (agent Windows Service, `Sentinel.Core`, `Sentinel.AI`, `Sentinel.Storage`, `Sentinel.Server`, `Sentinel.Admin`, `Sentinel.Tray`, `Sentinel.BrowserHost`, `extension/`, `Sentinel.Watchdog`, `Sentinel.Installer`, 70 tests et banc A/B/C).

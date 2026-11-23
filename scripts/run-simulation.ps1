@@ -2,13 +2,13 @@
 .SYNOPSIS
     Execute le benchmark scientifique A vs B vs C de SENTINEL et exporte les resultats (Markdown + JSON).
 .DESCRIPTION
-    Compile (si necessaire) tests/Sentinel.Simulation puis lance l'evaluation complete sur les 8 scenarios
-    d'attaque MITRE ATT&CK et le corpus benin (219 evenements). Exporte le rapport scientifique dans
+    Compile (si necessaire) tests/Sentinel.Simulation puis lance l'evaluation complete sur les 11 scenarios
+    d'attaque MITRE ATT&CK (v1 + v2) et le corpus benin 24 h (459 evenements). Exporte le rapport scientifique dans
     docs/evaluation-results.md et le jeu ScenarioMetricDto[] dans docs/evaluation-results.json.
 .EXAMPLE
     .\scripts\run-simulation.ps1
 .EXAMPLE
-    .\scripts\run-simulation.ps1 -Ollama -OllamaModel "qwen2.5:7b" -PushEvalUrl "http://127.0.0.1:5180" -Token "<jwt>"
+    .\scripts\run-simulation.ps1 -Ollama -OllamaModel "qwen2.5-coder:3b" -PushEvalUrl "http://127.0.0.1:5180" -Token "<jwt>"
 #>
 [CmdletBinding()]
 param(
@@ -16,7 +16,7 @@ param(
     [string]$OutputJson = "docs/evaluation-results.json",
     [switch]$Ollama,
     [string]$OllamaUrl = "http://localhost:11434",
-    [string]$OllamaModel = "qwen2.5:7b",
+    [string]$OllamaModel = "qwen2.5-coder:3b",
     [string]$PushEvalUrl = "",
     [string]$Token = "",
     [switch]$NoBuild

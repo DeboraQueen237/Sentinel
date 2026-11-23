@@ -8,12 +8,11 @@ Ce guide explique comment démarrer **SENTINEL**, accéder à la console d'admin
 
 - **Système** : Windows 10 ou Windows 11 (64 bits).
 - **SDK** : [.NET 10 SDK](https://dotnet.microsoft.com/download) (`10.0.x`).
-- **IA locale (optionnelle)** : [Ollama](https://ollama.com/) sur `http://localhost:11434` avec par exemple :
+- **IA locale (optionnelle)** : [Ollama](https://ollama.com/) sur `http://localhost:11434` avec le modèle par défaut v2 :
   ```powershell
-  ollama pull qwen2.5:7b
-  ollama pull nomic-embed-text
+  ollama pull qwen2.5-coder:3b
   ```
-  > Si Ollama est arrêté, SENTINEL bascule automatiquement et sans latence sur son moteur de règles déterministes + baseline comportementale.
+  > Si Ollama est arrêté ou lent sur CPU, SENTINEL bascule automatiquement sur ses moteurs déterministes (règles + Sigma + YARA/PE + Threat Intel + corrélation Markov).
 
 ---
 
@@ -54,7 +53,9 @@ Un script PowerShell tout-en-un démarre le serveur central (`Sentinel.Server`),
 
 ---
 
-## 4. Visite guidée et test des 8 écrans de la console
+## 4. Visite guidée et test des 13 écrans de la console (v2)
+
+> Pour le guide détaillé des nouveaux écrans v2 (`/intel`, `/rules`, `/ml`, `/canaries`, `/health`) et du sélecteur FR/EN, voir [admin-guide.md](admin-guide.md).
 
 | # | Écran | URL | Que vérifier et tester |
 |---|---|---|---|
@@ -71,7 +72,7 @@ Un script PowerShell tout-en-un démarre le serveur central (`Sentinel.Server`),
 
 ## 5. Exécution des tests automatisés et du benchmark scientifique
 
-### 5.1 Tests unitaires et d'intégration (70 tests)
+### 5.1 Tests unitaires et d'intégration (179 tests)
 
 ```powershell
 # Restaurer une fois si nécessaire
@@ -80,23 +81,23 @@ dotnet restore Sentinel.slnx
 # Compiler toute la solution
 dotnet build Sentinel.slnx --no-restore
 
-# Exécuter les 3 suites (Core : 34, Agent : 26, Server : 10)
-dotnet test Sentinel.slnx --no-restore
+# Exécuter les 4 suites (Agent : 37, Core : 37, Detection : 91, Server : 14)
+dotnet test Sentinel.slnx --no-build
 ```
 
 ### 5.2 Benchmark scientifique A vs B vs C (Time-To-Detect)
 
-Compare automatiquement les 3 configurations sur **8 scénarios d'attaque MITRE ATT&CK** + **219 événements bénins** :
-- **(A)** Règles seules
-- **(B)** Règles + IA locale
-- **(C)** Règles + IA + Corrélation & escalade précoce
+Compare automatiquement les 3 configurations sur **11 scénarios d'attaque MITRE ATT&CK (v1 + v2)** + **459 événements bénins (24 h simulées)** :
+- **(A)** Règles + Sigma seules
+- **(B)** Règles + Sigma + IA locale
+- **(C)** SENTINEL v2 complet (Règles + Sigma + IA + Corrélation Markov & escalade précoce)
 
 ```powershell
 # Exécuter le benchmark et générer docs/evaluation-results.md + docs/evaluation-results.json
 .\scripts\run-simulation.ps1
 
 # Ou avec Ollama réel s'il est démarré localement :
-.\scripts\run-simulation.ps1 -Ollama -OllamaModel "qwen2.5:7b"
+.\scripts\run-simulation.ps1 -Ollama -OllamaModel "qwen2.5-coder:3b"
 ```
 
 ### 5.3 Injecter de nouveaux événements simulés vers un serveur en cours d'exécution
