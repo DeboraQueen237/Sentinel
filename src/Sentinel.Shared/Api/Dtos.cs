@@ -139,8 +139,8 @@ public sealed record GraphDto(
     IReadOnlyList<ClusterDto> Clusters);
 
 // ----------------------------------------------------------------------------- Tableau de bord
+/// <summary>Synthèse globale du tableau de bord (<c>GlobalSecurityScore</c> : 0..100, 100 = sain).</summary>
 public sealed record DashboardSummaryDto(
-    /// <summary>Score de sécurité global 0..100 (100 = sain).</summary>
     int GlobalSecurityScore,
     int ActiveAlerts,
     int CriticalAlerts,

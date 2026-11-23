@@ -4,6 +4,10 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-default</AnalysisLevel>
+    <AnalysisModeSecurity>All</AnalysisModeSecurity>
+    <GenerateDocumentationFile Condition="'$(OutputType)' == '' or '$(OutputType)' == 'Library'">true</GenerateDocumentationFile>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <NoWarn>$(NoWarn);CS1591;CA1416</NoWarn>
     <Company>Sentinel</Company>

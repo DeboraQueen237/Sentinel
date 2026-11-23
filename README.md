@@ -1,9 +1,10 @@
-# SENTINEL
+# SENTINEL v2
 
-**Agent léger de détection et de prévention des menaces (EDR) avec moteur de corrélation contextuelle et IA 100 % locale**
+**Agent léger de détection et de prévention des menaces (EDR) pour Windows — Défense en profondeur multi-moteurs, corrélation Markovienne et IA 100 % locale**
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0%20LTS-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
-[![Platform](https://img.shields.io/badge/Plateforme-Windows%2010%2F11-0078D6?logo=windows)](https://www.microsoft.com/windows)
+[![Version](https://img.shields.io/badge/Version-2.0.0-10B981)](CHANGELOG.md)
+[![Platform](https://img.shields.io/badge/Plateforme-Windows%2010%2F11%20x64-0078D6?logo=windows)](https://www.microsoft.com/windows)
 [![License: MIT](https://img.shields.io/badge/Licence-MIT-green.svg)](LICENSE)
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions)](.github/workflows/ci.yml)
 
@@ -11,197 +12,105 @@
 
 ## Présentation
 
-**SENTINEL** surveille un poste Windows en continu, attribue à chaque événement technique un score de menace justifié (**règles déterministes + baseline comportementale + LLM local Ollama**), relie les **signaux faibles** dans un graphe de corrélation en temps réel et déclenche une **réponse graduée et réversible en un clic**.
+**SENTINEL v2** complète Microsoft Defender sur un poste Windows x64 en combinant **8 moteurs de détection locaux complémentaires**, un **moteur de corrélation contextuelle Markovien** (reliant les signaux faibles en chaînes MITRE ATT&CK), une **IA 100 % locale (Ollama, défaut `qwen2.5-coder:3b`)** et une **réponse graduée réversible en un clic**.
 
-> **Hypothèse scientifique démontrée** : *la corrélation d'événements individuellement faibles réduit significativement le délai de détection (Time-To-Detect) d'une chaîne d'attaque par rapport à une analyse événement par événement, à taux de faux positifs comparable — avec escalade précoce dès le 2ᵉ événement similaire dans un même contexte.*
+> **Résultat scientifique mesuré (v2 — 11 scénarios + 24 h bénin / 459 événements)** : la corrélation contextuelle réduit le délai de détection (**Time-To-Detect**) de **-55,0 %** (`13,55 s → 6,09 s`, `-0,91` événement en moyenne) avec **0,00 % de faux positifs** et une escalade dès le **2ᵉ événement** sur 100 % des chaînes multi-étapes — y compris en conditions réelles avec Ollama local `qwen2.5-coder:3b`. Voir [docs/evaluation-report.md](docs/evaluation-report.md).
 
-### Points forts
+### Nouveautés majeures de la v2
 
-- **100 % local et respectueux de la vie privée** : IA exécutée localement via Ollama, aucune donnée envoyée sur Internet, **aucun keylogger**, aucun contenu de documents ni de messageries collecté.
-- **Moteur de corrélation en graphe** : fenêtres glissantes (5 min / 30 min / 24 h), décroissance exponentielle, **7 chaînes d'attaque modélisées** (Phishing, BadUSB, Ransomware, Exfiltration, Brute force, Persistance, Ingénierie sociale) mappées à **MITRE ATT&CK**.
-- **Décision graduée & réversible** : niveaux 0–4, mode apprentissage 7 jours, mode simulation, tickets d'action réversibles en un clic (quarantaine chiffrée, règles pare-feu, hosts, PnP).
-- **Sécurité intégrée** : communication agent ↔ serveur en **gRPC mTLS** (PKI locale ECDSA P-256), secrets protégés par **DPAPI**, authentification admin **PBKDF2 + 2FA TOTP**, journaux d'événements et d'audit **chaînés en SHA-256** vérifiables, service **Watchdog** d'auto-protection.
-- **Console Blazor Server temps réel** : 8 écrans complets avec graphe interactif **Cytoscape.js** et graphiques **Chart.js** embarqués en local (zéro CDN).
-
----
-
-## Architecture synthétique
-
-```text
-Session Utilisateur             Services Windows (LocalSystem)           Serveur & Console
-───────────────────             ──────────────────────────────           ─────────────────
-extension/ (MV3) ──► BrowserHost ─┐                                      Sentinel.Server
-Sentinel.Tray (Clipboard, Frappe) ┼─► Named Pipe ─► Sentinel.Agent ──► gRPC mTLS (:5181)
-                                                    (Outbox SQLite)       ├─ Sentinel.Core (Pipeline)
-                                Sentinel.Watchdog ◄─► Auto-protection     ├─ Sentinel.AI ◄─► Ollama (:11434)
-                                                                          ├─ Sentinel.Storage (SQLite WAL)
-                                                                          └─ REST + SignalR (:5180)
-                                                                                    ▲
-                                                                                    ▼
-                                                                          Sentinel.Admin (Blazor :5200)
-```
-
-Pour l'architecture détaillée (diagrammes Mermaid, flux gRPC/IPC/SignalR et schéma relationnel complet), voir [docs/architecture.md](docs/architecture.md).
+- **Appui natif sur Microsoft Defender & Sysmon optionnel (M1)** : collecte WMI + journal `Windows Defender/Operational` (détections + affaiblissement : exclusions, protection temps réel désactivée, arrêt service), détection automatique de Sysmon (jamais embarqué), dédoublonnage multi-sources.
+- **Moteur Sigma natif en C# (M2)** : parseur YAML (`YamlDotNet`), sélections/filtres/conditions/modificateurs (`contains`, `startswith`, `endswith`, `re`, `all`, `windash`, `base64`), 14 règles MIT incluses + script de mise à jour SigmaHQ (`DRL 1.1`), benchmark 1 000 règles × 10 000 événements en ~4 s.
+- **Moteur YARA + Analyse statique PE (M3)** : intégration `dnYara` avec repli managé transparent (`ManagedYaraFallbackEngine` si `libyara.dll` absente), analyse PE `PeNet` (Authenticode, entropie par section, imports suspects, packers, horodatage), scan événementiel + planifié + à la demande, limites strictes de ressources.
+- **Threat Intelligence locale hors-ligne (M4)** : clients HTTP résilients Polly v8 (abuse.ch MalwareBazaar, ThreatFox, URLhaus, Feodo Tracker en CC0 ; OpenPhish/PhishTank opt-in ; VirusTotal strictement à la demande par hash), stockage SQLite indexé + filtre de Bloom (`< 2 ms` hors-ligne).
+- **Classifieur ML de fichiers PE (M5)** : 51 caractéristiques EMBER-like (`PeNet`) + ML.NET FastTree (`Sentinel.ML` + CLI `Sentinel.ML.Trainer`), score strictement borné (≤ 35/100, **jamais seul décisif**), explicabilité locale (`CalculateFeatureContribution`).
+- **Fichiers canari anti-ransomware (M6)** : déploiement discret de fichiers leurres avec empreintes SHA-256 ; toute modification, renommage, chiffrement ou suppression déclenche immédiatement une réponse critique réversible.
+- **Visibilité scripts sans fournisseur AMSI managé (M7)** : PowerShell Script Block Logging Event ID `4104` + ETW `Microsoft-Antimalware-Scan-Interface` optionnel, métadonnées/hash/indicateurs par défaut (extrait tronqué avec caviardage automatique des secrets désactivé par défaut).
+- **Corrélation avancée & gouvernance (M8–M9)** : modèle de transitions de Markov, feedback VP/FP historisé et réversible, arêtes horodatées, récit chronologique, ventilation des contributions par moteur, verrouillage anti brute-force admin (HTTP 429), ACL NTFS restrictives (`SYSTEM` + `Administrateurs`), Watchdog avec détection de suppression de service.
+- **Console Blazor v2 bilingue FR/EN (M11)** : 13 écrans complets (nouveaux écrans `/intel`, `/rules`, `/ml`, `/canaries`, `/health`, graphe enrichi avec filtre tactique MITRE & récit chronologique), thème clair/sombre, zéro CDN.
+- **Installateur Windows x64 professionnel (M13)** : package **MSI WiX v5** (`SentinelSetup-2.0.0.msi`), archive portable (`SentinelPortable-2.0.0.zip`), assistant graphique avec consentement explicite et scripts `build/build.ps1` / `build/sign.ps1`.
 
 ---
 
 ## Prérequis
 
-| Composant | Version / Détail | Obligatoire |
+| Composant | Détail | Obligatoire |
 |---|---|---|
-| **OS** | Windows 10 / 11 (64 bits) | Oui |
-| **.NET SDK** | **.NET 10 SDK** (10.0 LTS) | Oui |
-| **Ollama** | Instance locale sur `http://localhost:11434` (`qwen2.5:7b` sur 16 Go RAM, `qwen2.5:3b` ou `phi3:mini` sur 8 Go RAM ; `nomic-embed-text` optionnel) | Optionnel *(repli automatique sur les règles déterministes si indisponible)* |
-| **Droits administrateur** | Requis pour l'installation des services Windows et la collecte ETW complète | Pour le déploiement service |
+| **Système** | Windows 10 / 11 (x64) | Oui |
+| **.NET** | **.NET 10 SDK** (pour compilation depuis les sources) ou **MSI autonome / portable** | Pour dev / build |
+| **Microsoft Defender** | Maintenu actif (SENTINEL complète Defender, ne le remplace pas) | Recommandé |
+| **Ollama (local)** | Instance locale `http://localhost:11434` — modèle par défaut **`qwen2.5-coder:3b`** (1,9 Go, compatible 8–16 Go RAM) | Optionnel *(repli déterministe automatique)* |
+| **Sysmon** | Optionnel, jamais embarqué ; automatiquement détecté s'il est installé | Optionnel |
 
 ---
 
 ## Démarrage rapide
 
-### 1. Compilation et tests
+### 1. Compilation et tests (21 projets, 179 tests)
 
 ```powershell
 dotnet restore Sentinel.slnx
 dotnet build Sentinel.slnx --no-restore
-dotnet test Sentinel.slnx --no-restore
+dotnet test Sentinel.slnx --no-build
 ```
 
-### 2. Lancement en mode développement (sans installer les services Windows)
-
-Le script PowerShell dédié démarre automatiquement le serveur, la console Blazor et (en option) injecte des scénarios de démonstration réalistes en direct via gRPC :
+### 2. Lancement en développement (avec données de démonstration)
 
 ```powershell
-# Démarrage rapide (Serveur + Console Admin + démonstration multi-postes pré-remplie)
+# Démarre Sentinel.Server (:5180/:5181) + Sentinel.Admin (:5200) + démonstration multi-postes
 .\scripts\run-dev.ps1 -SeedDemo
 
-# Ou avec l'agent système local et l'icône de notification
-.\scripts\run-dev.ps1 -WithAgent -WithTray
+# Ouvrez ensuite http://127.0.0.1:5200 dans votre navigateur
 ```
 
-Vous pouvez aussi lancer chaque processus manuellement avec `SENTINEL_DATA_DIR` pour isoler les données de développement (base SQLite, certificats mTLS, secrets DPAPI, journaux) :
+### 3. Lancer l'évaluation scientifique A vs B vs C
 
 ```powershell
-$env:SENTINEL_DATA_DIR = "$PWD\.sentinel-dev"
+# Benchmark déterministe (CI)
+dotnet run --project tests/Sentinel.Simulation -- --output-md docs/evaluation-results.md --output-json docs/evaluation-results.json
 
-# Terminal 1 — Serveur d'analyse (REST/SignalR :5180, gRPC mTLS :5181)
-dotnet run --project src/Sentinel.Server/Sentinel.Server.csproj
-
-# Terminal 2 — Console d'administration Blazor (http://127.0.0.1:5200)
-dotnet run --project src/Sentinel.Admin/Sentinel.Admin.csproj
-
-# Terminal 3 — Agent de collecte
-dotnet run --project src/Sentinel.Agent/Sentinel.Agent.csproj
-
-# Terminal 4 (optionnel) — Compagnon barre système (presse-papiers, rythme de frappe, notifications)
-dotnet run --project src/Sentinel.Tray/Sentinel.Tray.csproj
+# Benchmark réel avec votre Ollama local (qwen2.5-coder:3b)
+dotnet run --project tests/Sentinel.Simulation -- --ollama --ollama-url http://localhost:11434 --ollama-model qwen2.5-coder:3b
 ```
 
-Ouvrez ensuite `http://127.0.0.1:5200` dans votre navigateur pour créer le compte administrateur initial (mot de passe + QR code **2FA TOTP**).
-
-### 3. Activer le scoring IA local (Ollama, optionnel)
+### 4. Construire le MSI WiX v5 et l'archive portable
 
 ```powershell
-ollama pull qwen2.5:7b
-ollama serve
+# Restore + Release build + Tests + Publication win-x64 + MSI WiX v5 + Portable ZIP + SHA256SUMS.txt
+.\build\build.ps1
 ```
 
-### 4. Construction du Setup et déploiement en services Windows
-
-Générez le package d'installation autonome (`dist/Sentinel-Setup-v1.0.0/` et `dist/Sentinel-Setup-v1.0.0.zip`) puis lancez l'assistant graphique (droits administrateur pour les services Windows) :
-
-```powershell
-# Générer le Setup complet (inclut Server, Admin, Agent, Watchdog, Tray, BrowserHost, extension/)
-.\scripts\build-installer.ps1
-
-# Lancer l'assistant graphique (avec écran de consentement explicite)
-.\dist\Sentinel-Setup-v1.0.0\Sentinel.Installer.exe
-
-# Ou en ligne de commande (mode développeur / CI) :
-dotnet run --project src/Sentinel.Installer/Sentinel.Installer.csproj
-```
-
-L'installeur déploie les 194 fichiers applicatifs, affiche l'**écran de consentement explicite** (`consent.json`), génère les certificats mTLS locaux (`SentinelPki`), calcule le manifeste d'intégrité SHA-256 (`integrity-manifest.json`), installe les services Windows (`SentinelServer`, `SentinelAdmin`, `SentinelAgent`, `SentinelWatchdog`), configure le démarrage automatique de `Sentinel.Tray` et enregistre l'hôte Native Messaging pour l'extension navigateur (`extension/`).
+Les livrables sont produits dans `dist/` :
+- `dist/SentinelSetup-2.0.0.msi` (installateur Windows MSI WiX v5)
+- `dist/SentinelPortable-2.0.0.zip` (archive portable x64)
+- `dist/SHA256SUMS.txt` (empreintes SHA-256 vérifiables)
 
 ---
 
-## Écrans de la console d'administration (`Sentinel.Admin`)
+## Documentation complète (`docs/`)
 
-| # | Écran | Fonctionnalités principales |
-|---|---|---|
-| 1 | **Vue d'ensemble** | Score de sécurité global (0–100), alertes actives, blocages en cours, courbe des menaces 24 h / 7 j / 30 j, santé LLM/agents |
-| 2 | **Alertes** | Liste filtrable, détail explicable (règles, IA, MITRE ATT&CK, événements liés), actions *Approuver / Rejeter (faux positif) / Acquitter / Résoudre* |
-| 3 | **Graphe de corrélation** | Visualisation interactive **Cytoscape.js** : zoom, filtres temporels/score, inspection des nœuds et mise en évidence des clusters |
-| 4 | **Fiches** | Profil par poste, utilisateur, domaine, processus, fichier, périphérique ou IP avec baseline comportementale *(consultation journalisée)* |
-| 5 | **Actions & blocages** | Suivi des tickets d'action, blocages manuels et **annulation en un clic** (restauration de l'état initial) |
-| 6 | **Rapports** | Export **PDF** (QuestPDF) et **JSON** des rapports de sécurité et résultats d'évaluation A/B/C |
-| 7 | **Paramètres** | Seuils 0–4, mode (`Learning` / `Simulation` / `Active`), dossiers surveillés, exclusions, rétention, modèle Ollama, paramètres de corrélation |
-| 8 | **Audit** | Journal chaîné SHA-256 des accès et actions administrateur + bouton de **vérification d'intégrité cryptographique** |
-
----
-
-## Structure du dépôt
-
-```text
-Sentinel/
-├── README.md
-├── LICENSE                          # Licence MIT
-├── Sentinel.slnx                    # Solution .NET 10
-├── Directory.Build.props            # Propriétés communes (net10.0, Nullable)
-├── Directory.Packages.props         # Gestion centralisée des versions NuGet
-├── SENTINEL_Documentation.md        # Spécification de conception initiale
-├── .github/workflows/ci.yml         # Pipeline CI GitHub Actions (Windows / .NET 10)
-├── docs/
-│   ├── architecture.md              # Architecture détaillée, flux gRPC/IPC/SignalR, schéma BDD
-│   ├── privacy-and-consent.md       # Liste fermée de collecte, texte de consentement, cadre légal
-│   ├── threat-model.md              # Analyse STRIDE, surfaces d'attaque et limites assumées
-│   ├── correlation-rules.md         # Clés, fenêtres, formule de cluster et 7 chaînes MITRE ATT&CK
-│   ├── decision-matrix.md           # Niveaux 0–4, matrice d'actions, réversibilité et anti-FP
-│   ├── test-plan.md                 # Scénarios de simulation et protocole comparatif A / B / C
-│   └── guide-utilisation-et-tests.md # Guide pas-à-pas d'utilisation et de test complet
-├── extension/                       # Extension navigateur Manifest V3 (Chrome / Edge)
-├── src/
-│   ├── Sentinel.Shared/             # Contrats figés : modèles, REST/SignalR, gRPC, IPC, PKI, HashChain
-│   ├── Sentinel.AI/                 # Client Ollama local, prompts encadrés, validation JSON
-│   ├── Sentinel.Core/               # Pipeline d'analyse : règles, baseline, corrélation, décision
-│   ├── Sentinel.Storage/            # EF Core SQLite WAL (compatible PostgreSQL), intégrité, rétention
-│   ├── Sentinel.Server/             # Service central : gRPC mTLS, API REST, SignalR, PDF, auth 2FA
-│   ├── Sentinel.Agent/              # Service Windows : collecteurs, outbox SQLite, exécuteur d'actions
-│   ├── Sentinel.Tray/               # Compagnon session utilisateur : icône, presse-papiers, rythme de frappe
-│   ├── Sentinel.BrowserHost/        # Hôte Native Messaging reliant extension/ au Named Pipe
-│   ├── Sentinel.Watchdog/           # Service indépendant d'auto-protection et contrôle SHA-256
-│   ├── Sentinel.Admin/              # Console d'administration Blazor Server + Cytoscape.js / Chart.js
-│   └── Sentinel.Installer/          # Installeur WinForms avec écran de consentement explicite
-└── tests/
-    ├── Sentinel.Core.Tests/         # Tests unitaires scoring, corrélation, décision
-    ├── Sentinel.Agent.Tests/        # Tests unitaires collecteurs, outbox, réversibilité
-    ├── Sentinel.Server.Tests/       # Tests intégration stockage, hash-chain, API, auth
-    └── Sentinel.Simulation/         # Banc de simulation des scénarios d'attaque (A vs B vs C)
-```
+| Document | Contenu |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | Architecture globale v2 (21 projets), diagrammes Mermaid, flux gRPC/IPC/SignalR, schéma BDD & disques |
+| [docs/detection-sources.md](docs/detection-sources.md) | Sources v2 : Defender, Sysmon, Sigma (table de mapping), YARA/PE, Threat Intel, ML PE, Canaris, PowerShell 4104 |
+| [docs/correlation-rules.md](docs/correlation-rules.md) | Graphe temporel, modèle de Markov, escalade au 2ᵉ événement, chaînes MITRE ATT&CK, feedback réversible |
+| [docs/decision-matrix.md](docs/decision-matrix.md) | Matrice de décision déterministe (niveaux 0–4), réversibilité en 1 clic, anti-faux-positifs |
+| [docs/privacy-and-consent.md](docs/privacy-and-consent.md) | Liste fermée de collecte, exclusions absolues, notice de consentement, rétention, audit |
+| [docs/threat-model.md](docs/threat-model.md) | Analyse STRIDE v2, durcissement (lockout 429, ACL NTFS, Watchdog, anti-prompt-injection) |
+| [docs/evaluation-report.md](docs/evaluation-report.md) | Rapport scientifique v2 (11 scénarios + 24 h bénin, déterministe & Ollama réel `qwen2.5-coder:3b`) |
+| [docs/ml-evaluation.md](docs/ml-evaluation.md) | Classifieur ML PE (51 features EMBER-like, métriques, obtention légale EMBER, limites) |
+| [docs/install-guide.md](docs/install-guide.md) | Guide d'installation (MSI, Setup WinForms, portable, Ollama, Defender/Sysmon, désinstallation) |
+| [docs/admin-guide.md](docs/admin-guide.md) | Guide administrateur SOC (13 écrans, règles, renseignement, canaris, annulation d'actions, audit) |
+| [docs/user-guide.md](docs/user-guide.md) | Guide utilisateur poste (icône Tray, confidentialité, modes, notifications) |
+| [docs/limitations.md](docs/limitations.md) | Limites assumées, écarts connus et recommandations de déploiement |
+| [docs/test-plan.md](docs/test-plan.md) | Plan de test complet, scénarios v1/v2 et protocole VM Atomic Red Team |
+| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Inventaire complet des licences (NuGet, JS, règles, flux TI, outils) |
+| [SECURITY.md](SECURITY.md) | Politique de sécurité et signalement de vulnérabilités |
+| [CHANGELOG.md](CHANGELOG.md) | Historique détaillé des versions (`1.0.0` → `2.0.0`) |
 
 ---
 
-## Tests et simulation d'attaque
+## Éthique, vie privée et licence
 
-```powershell
-# Exécuter la suite complète de tests
-dotnet test Sentinel.slnx --no-restore
-
-# Exécuter le comparatif scientifique (A: Règles | B: Règles+IA | C: Règles+IA+Corrélation)
-dotnet run --project tests/Sentinel.Simulation/Sentinel.Simulation.csproj
-```
-
-Voir [docs/test-plan.md](docs/test-plan.md) pour les 8 scénarios de simulation (EICAR, Phishing, BadUSB, Ransomware, Exfiltration, Brute force, Persistance, Ingénierie sociale) et les métriques (TTD, rappel, précision, FPR).
-
----
-
-## Éthique, vie privée et limites assumées
-
-- **Exclusions absolues** : aucun enregistrement de frappes clavier (pas de keylogger), aucun contenu de messageries chiffrées, aucun contenu de documents ni de formulaires web.
-- **Consentement et transparence** : écran de consentement explicite avant installation, icône visible en permanence, rétention automatique (90 j événements / 12 mois alertes), audit chaîné des accès administrateur. Voir [docs/privacy-and-consent.md](docs/privacy-and-consent.md).
-- **Complémentaire à votre antivirus** : SENTINEL est un **EDR léger en espace utilisateur/service** ; il ne remplace pas un antivirus à pilote noyau (**conservez Microsoft Defender actif**). Voir [docs/threat-model.md](docs/threat-model.md).
-
----
-
-## Licence
-
-Ce projet est distribué sous licence **MIT** — voir le fichier [LICENSE](LICENSE).
+- **Défensif uniquement** : aucun malware, exploit, keylogger ni outil offensif.
+- **Vie privée vérifiée automatiquement** : aucune frappe clavier, aucun contenu de document ou de messagerie stocké (vérifié par inspection SQLite automatisée dans `Sentinel.Server.Tests`).
+- **Licence** : distribué sous licence **MIT** — voir [LICENSE](LICENSE) et [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

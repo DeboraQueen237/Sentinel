@@ -35,7 +35,7 @@ else
                         <div class="row-wrap" style="gap:8px;">
                             <span class="pulse-dot @(a.Online ? "online" : "offline")"></span>
                             <h2 class="card-title">@a.MachineName</h2>
-                            <span class="mono text-muted" style="font-size:12px;">@a.HostId • v@a.AgentVersion</span>
+                            <span class="mono text-muted" style="font-size:12px;">@a.HostId • v@(a.AgentVersion)</span>
                         </div>
                         <p class="card-subtitle">@a.OsVersion • @L.T("Vu", "Last seen") @UiFormatters.RelativeTime(a.LastSeen)</p>
                     </div>
