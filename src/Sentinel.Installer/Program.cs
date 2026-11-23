@@ -38,7 +38,10 @@ internal static class Program
                   --extension-id <id>       Identifiant de l'extension Chrome/Edge
                   --register-tray           Active le démarrage automatique de Sentinel.Tray
                   --start-services          Démarre immédiatement les services et Sentinel.Tray après installation
-                  --uninstall               Désinstalle services, démarrage auto, entrée Windows et hôte navigateur
+                  --no-canaries             Désactive l'activation initiale des fichiers canaris
+                  --no-firewall             Ne crée pas les règles pare-feu locales
+                  --uninstall               Désinstalle services, démarrage auto, raccourci, pare-feu et hôte navigateur
+                  --delete-data             À combiner avec --uninstall pour supprimer également %ProgramData%\Sentinel
                 """);
             return 0;
         }
@@ -47,7 +50,7 @@ internal static class Program
         {
             try
             {
-                InstallerCore.Uninstall(Console.WriteLine);
+                InstallerCore.Uninstall(Console.WriteLine, deleteData: flags.Contains("--delete-data"));
                 return 0;
             }
             catch (Exception ex)
@@ -78,7 +81,9 @@ internal static class Program
             RegisterTrayAutoStart: flags.Contains("--register-tray"),
             InstallAdminService: flags.Contains("--install-admin-service"),
             StartAfterInstall: flags.Contains("--start-services"),
-            SourceDirectory: sourceDir);
+            SourceDirectory: sourceDir,
+            EnableCanaries: !flags.Contains("--no-canaries"),
+            ConfigureFirewall: !flags.Contains("--no-firewall"));
 
         try
         {

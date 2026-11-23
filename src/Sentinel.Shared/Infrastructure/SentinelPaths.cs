@@ -54,8 +54,17 @@ public static class SentinelPaths
     private static string Ensure(string sub)
     {
         var p = Path.Combine(Root, sub);
-        Directory.CreateDirectory(p);
-        return p;
+        try
+        {
+            Directory.CreateDirectory(p);
+            return p;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            var fallback = Path.Combine(Path.GetTempPath(), "Sentinel", sub);
+            Directory.CreateDirectory(fallback);
+            return fallback;
+        }
     }
 }
 
