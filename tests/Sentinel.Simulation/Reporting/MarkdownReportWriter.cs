@@ -26,7 +26,7 @@ public static class MarkdownReportWriter
         sb.AppendLine($"> **Moteur IA utilisé (B & C)** : {report.LlmModeLabel}");
         if (!report.UsingRealOllama)
         {
-            sb.AppendLine("> *Note méthodologique :* cette exécution repose sur l'évaluateur déterministe local `DeterministicSimulatedLlmAssessor` (sans dépendance réseau). Relancez avec `--ollama` lorsqu'un serveur Ollama local est actif pour mesurer la latence et les scores d'un LLM réel (`qwen2.5:7b`).");
+            sb.AppendLine("> *Note méthodologique :* cette exécution repose sur l'évaluateur déterministe local `DeterministicSimulatedLlmAssessor` (sans dépendance réseau). Relancez avec `--ollama --ollama-model qwen2.5-coder:3b` lorsqu'un serveur Ollama local est actif pour mesurer la latence et les scores réels.");
         }
         sb.AppendLine();
 
@@ -34,10 +34,10 @@ public static class MarkdownReportWriter
         sb.AppendLine();
         sb.AppendLine("> *La corrélation d'événements individuellement faibles réduit le délai de détection d'une chaîne d'attaque (Time-To-Detect) par rapport à une analyse événement par événement, à taux de faux positifs comparable.*");
         sb.AppendLine();
-        sb.AppendLine("Trois configurations sont comparées sur exactement les mêmes 8 scénarios d'attaque et le même corpus bénin de fond :");
-        sb.AppendLine("- **(A) Règles seules** : `Llm.Enabled = false`, `Correlation.Enabled = false`.");
-        sb.AppendLine("- **(B) Règles + IA sans corrélation** : `Llm.Enabled = true`, `Correlation.Enabled = false`.");
-        sb.AppendLine("- **(C) Règles + IA + Corrélation** : `Llm.Enabled = true`, `Correlation.Enabled = true`, `EarlyEscalation = true`.");
+        sb.AppendLine($"Trois configurations sont comparées sur exactement les mêmes {sumC.TotalScenarios} scénarios d'attaque (v1 + v2) et le même corpus bénin de fond sur 24 heures :");
+        sb.AppendLine("- **(A) Règles + Sigma seules** : `Llm.Enabled = false`, `Correlation.Enabled = false`.");
+        sb.AppendLine("- **(B) Règles + Sigma + IA sans corrélation** : `Llm.Enabled = true`, `Correlation.Enabled = false`.");
+        sb.AppendLine("- **(C) SENTINEL v2 Complet** : `Llm.Enabled = true`, `Correlation.Enabled = true`, `EarlyEscalation = true` (graphe Markovien).");
         sb.AppendLine();
         sb.AppendLine("Un scénario est considéré **détecté** dès qu'une décision atteint le niveau **Élevé (≥ 75)** ou déclenche `AlertAdmin = true`.");
         sb.AppendLine();
@@ -139,12 +139,9 @@ public static class MarkdownReportWriter
 
         sb.AppendLine("## 5. Corpus de trafic bénin et maîtrise des faux positifs");
         sb.AppendLine();
-        sb.AppendLine($"Le corpus bénin comporte **{report.BenignEventCount} événements** simulant une journée de travail typique (08h30–17h30) :");
-        sb.AppendLine("- Processus signés Microsoft, Google et Mozilla (`WINWORD.EXE`, `EXCEL.EXE`, `OUTLOOK.EXE`, `chrome.exe`, `msedge.exe`, `firefox.exe`, `Teams.exe`, `Code.exe`).");
-        sb.AppendLine("- Navigation et connexions HTTPS vers des domaines habituels (`github.com`, `microsoft.com`, `office.com`, `wikipedia.org`, `stackoverflow.com`, `intranet.entreprise.local`).");
-        sb.AppendLine("- Créations et modifications de fichiers bureautiques basse entropie (`.docx`, `.xlsx`, `.pdf`, `.txt`, `.pptx`, `.csv`, entropie 3.8–5.4 bits/octet).");
-        sb.AppendLine("- Dynamique de saisie humaine normale (~5 touches/s, écart-type ~45 ms) établissant la baseline de Welford.");
-        sb.AppendLine("- Cycle de session normal (ouverture à 09h00, verrouillage/déverrouillage, fermeture à 17h30) et une erreur isolée de mot de passe en journée.");
+        sb.AppendLine($"Le corpus bénin comporte **{report.BenignEventCount} événements** simulant une journée complète de **24 heures** (00h00–23h59) :");
+        sb.AppendLine("- Activité bureautique de journée (08h30–17h30) : processus signés Microsoft/Google/Mozilla, domaines habituels, fichiers bureautiques basse entropie, dynamique de saisie humaine (~5 touches/s, σ ≈ 45 ms), cycle de session et erreur isolée de mot de passe.");
+        sb.AppendLine("- Activité de fond sur 24 h (nuit et soirée) : mises à jour Windows/Defender (`MsMpEng.exe`, `UsoClient.exe`), synchronisation `OneDrive.exe`, indexation `SearchIndexer.exe`, résolutions DNS légitimes et blocs PowerShell d'administration non obfusqués.");
         sb.AppendLine();
         sb.AppendLine(string.Format(
             inv,

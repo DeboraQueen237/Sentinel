@@ -8,6 +8,7 @@
     <ProjectReference Include="..\..\src\Sentinel.Shared\Sentinel.Shared.csproj" />
     <ProjectReference Include="..\..\src\Sentinel.AI\Sentinel.AI.csproj" />
     <ProjectReference Include="..\..\src\Sentinel.Core\Sentinel.Core.csproj" />
+    <ProjectReference Include="..\..\src\Sentinel.Detection.Sigma\Sentinel.Detection.Sigma.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Grpc.Net.Client" />
