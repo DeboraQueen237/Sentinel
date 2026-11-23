@@ -15,7 +15,7 @@ public sealed record CliOptions
     public string? BearerToken { get; init; }
     public bool UseOllama { get; init; }
     public string OllamaUrl { get; init; } = "http://localhost:11434";
-    public string OllamaModel { get; init; } = "qwen2.5:7b";
+    public string OllamaModel { get; init; } = "qwen2.5-coder:3b";
     public string? HostId { get; init; }
     public int DelayMs { get; init; }
 
@@ -34,7 +34,7 @@ public sealed record CliOptions
         string? token = null;
         var useOllama = false;
         var ollamaUrl = "http://localhost:11434";
-        var ollamaModel = "qwen2.5:7b";
+        var ollamaModel = "qwen2.5-coder:3b";
         string? hostId = null;
         var delayMs = 0;
 
@@ -151,8 +151,8 @@ public sealed record CliOptions
               dotnet run --project tests/Sentinel.Simulation -- [options]
 
             Modes :
-              (par défaut)               Exécute le benchmark complet A vs B vs C sur les 8 scénarios
-                                         d'attaque et le corpus bénin (220+ événements).
+              (par défaut)               Exécute le benchmark complet A vs B vs C sur les 11 scénarios
+                                         d'attaque (v1 + v2) et le corpus bénin 24 h (480+ événements).
               --push-grpc <url>          S'enregistre auprès de Sentinel.Server via gRPC AgentGateway
                                          (ex. https://localhost:5181) et rejoue un scénario réaliste
                                          multi-postes (WS-FINANCE-01, WS-RH-02, SRV-COMPTA-03).
@@ -167,7 +167,7 @@ public sealed record CliOptions
               --cert-dir <dossier>       Dossier PKI alternatif pour SentinelPki (mode --push-grpc).
               --ollama                   Tente d'utiliser Ollama local avant repli sur l'analyste simulé.
               --ollama-url <url>         Endpoint Ollama (défaut : http://localhost:11434).
-              --ollama-model <modèle>    Modèle Ollama (défaut : qwen2.5:7b).
+              --ollama-model <modèle>    Modèle Ollama (défaut : qwen2.5-coder:3b).
               --host <id>                Identifiant de poste unique (mode --push-grpc ou benchmark).
               --delay-ms <ms>            Délai en millisecondes entre événements (démo temps réel).
               -h, --help                 Affiche cette aide.
