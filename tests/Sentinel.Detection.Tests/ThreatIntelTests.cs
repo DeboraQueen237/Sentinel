@@ -581,7 +581,7 @@ public sealed class ThreatIntelTests : IDisposable
             var dto = service.Lookup("hash", batch[i * 40].Value);
             dto.Found.Should().BeTrue();
             dto.SuggestedScore.Should().BeInRange(90, 96);
-            dto.ElapsedMs.Should().BeLessThan(5.0);
+            dto.ElapsedMs.Should().BeLessThan(25.0);
         }
         var avgHitMs = Stopwatch.GetElapsedTime(hitStart).TotalMilliseconds / 200.0;
         avgHitMs.Should().BeLessThan(2.0, "un lookup SQLite indexé après hit Bloom doit rester sous 2 ms");

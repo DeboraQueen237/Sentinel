@@ -50,6 +50,21 @@ public static class DirectorySecurityHardener
     [SupportedOSPlatform("windows")]
     private static AclHardeningResult ApplyWindowsAcl(string directoryPath)
     {
+        // En mode non-élevé (ex. dotnet run sous jeton UAC filtré), retirer l'utilisateur courant
+        // verrouillerait immédiatement le processus lui-même hors de son propre répertoire de données.
+        // Le durcissement strict SYSTEM + Administrateurs ne s'applique qu'en contexte Service (SYSTEM)
+        // ou Administrateur élevé (installateur / service Windows).
+        using var identity = WindowsIdentity.GetCurrent();
+        var principal = new WindowsPrincipal(identity);
+        var isElevatedOrSystem = identity.IsSystem || principal.IsInRole(WindowsBuiltInRole.Administrator);
+        if (!isElevatedOrSystem)
+        {
+            return new AclHardeningResult(
+                false,
+                directoryPath,
+                "Processus non élevé (mode développement) : durcissement NTFS SYSTEM+Administrateurs réservé aux services Windows et à l'installateur élevé.");
+        }
+
         var dirInfo = new DirectoryInfo(directoryPath);
         var security = dirInfo.GetAccessControl();
 
