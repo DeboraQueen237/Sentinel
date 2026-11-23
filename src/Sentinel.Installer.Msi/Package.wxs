@@ -1,0 +1,191 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package Name="SENTINEL EDR"
+           Manufacturer="Sentinel Contributors"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="7F4A2C91-8E3B-4D15-9A62-3C8E5F104B2D"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <SummaryInformation Description="SENTINEL v$(var.ProductVersion) - Local EDR with Context Correlation" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <MajorUpgrade DowngradeErrorMessage="Une version plus recente de SENTINEL est deja installee."
+                  AllowSameVersionUpgrades="yes" />
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Sentinel" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="SentinelDataRoot" Name="Sentinel">
+        <Directory Id="SentinelRulesDir" Name="rules">
+          <Directory Id="SentinelSigmaRulesDir" Name="sigma" />
+          <Directory Id="SentinelYaraRulesDir" Name="yara" />
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="SentinelProgramMenuFolder" Name="SENTINEL" />
+    </StandardDirectory>
+
+    <Feature Id="SentinelComplete"
+             Title="SENTINEL v$(var.ProductVersion) (Complet)"
+             Description="Serveur d'analyse, Console Blazor, Agent EDR, Watchdog, Tray, BrowserHost, regles Sigma &amp; YARA."
+             Level="1">
+      <ComponentGroupRef Id="SentinelServicesComponents" />
+      <ComponentGroupRef Id="SentinelRuntimePayload" />
+      <ComponentGroupRef Id="SentinelDefaultRules" />
+      <ComponentGroupRef Id="SentinelIntegrationComponents" />
+    </Feature>
+
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="SentinelServicesComponents" Directory="INSTALLFOLDER">
+
+      <Component Id="SentinelServerServiceComponent" Guid="1A2B3C4D-1001-4E5F-8A9B-0C1D2E3F4A01">
+        <File Id="SentinelServerExe" Source="$(var.PayloadDir)\Sentinel.Server.exe" KeyPath="yes" />
+        <ServiceInstall Id="InstallSentinelServer"
+                        Name="SentinelServer"
+                        DisplayName="SENTINEL — Serveur d'analyse et corrélation"
+                        Description="Service central SENTINEL : gRPC mTLS (:5181), moteur de corrélation Markov, REST/SignalR (:5180)."
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Vital="yes" />
+        <ServiceControl Id="ControlSentinelServer"
+                        Name="SentinelServer"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+        <util:ServiceConfig ServiceName="SentinelServer"
+                            FirstFailureActionType="restart"
+                            SecondFailureActionType="restart"
+                            ThirdFailureActionType="restart"
+                            RestartServiceDelayInSeconds="5"
+                            ResetPeriodInDays="1" />
+      </Component>
+
+      <Component Id="SentinelAdminServiceComponent" Guid="1A2B3C4D-1002-4E5F-8A9B-0C1D2E3F4A02">
+        <File Id="SentinelAdminExe" Source="$(var.PayloadDir)\Sentinel.Admin.exe" KeyPath="yes" />
+        <ServiceInstall Id="InstallSentinelAdmin"
+                        Name="SentinelAdmin"
+                        DisplayName="SENTINEL — Console d'administration Blazor"
+                        Description="Interface Web locale SOC de SENTINEL sur http://127.0.0.1:5200."
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Vital="yes" />
+        <ServiceControl Id="ControlSentinelAdmin"
+                        Name="SentinelAdmin"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+        <util:ServiceConfig ServiceName="SentinelAdmin"
+                            FirstFailureActionType="restart"
+                            SecondFailureActionType="restart"
+                            ThirdFailureActionType="restart"
+                            RestartServiceDelayInSeconds="5"
+                            ResetPeriodInDays="1" />
+      </Component>
+
+      <Component Id="SentinelAgentServiceComponent" Guid="1A2B3C4D-1003-4E5F-8A9B-0C1D2E3F4A03">
+        <File Id="SentinelAgentExe" Source="$(var.PayloadDir)\Sentinel.Agent.exe" KeyPath="yes" />
+        <ServiceInstall Id="InstallSentinelAgent"
+                        Name="SentinelAgent"
+                        DisplayName="SENTINEL — Agent de détection et réponse"
+                        Description="Collecteurs locaux (ETW, Defender, Sysmon optionnel, Canaris, PowerShell 4104) et exécuteur d'actions réversibles."
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Vital="yes" />
+        <ServiceControl Id="ControlSentinelAgent"
+                        Name="SentinelAgent"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+        <util:ServiceConfig ServiceName="SentinelAgent"
+                            FirstFailureActionType="restart"
+                            SecondFailureActionType="restart"
+                            ThirdFailureActionType="restart"
+                            RestartServiceDelayInSeconds="5"
+                            ResetPeriodInDays="1" />
+      </Component>
+
+      <Component Id="SentinelWatchdogServiceComponent" Guid="1A2B3C4D-1004-4E5F-8A9B-0C1D2E3F4A04">
+        <File Id="SentinelWatchdogExe" Source="$(var.PayloadDir)\Sentinel.Watchdog.exe" KeyPath="yes" />
+        <ServiceInstall Id="InstallSentinelWatchdog"
+                        Name="SentinelWatchdog"
+                        DisplayName="SENTINEL — Watchdog d'auto-protection"
+                        Description="Surveille la disponibilité et l'intégrité SHA-256 des services SENTINEL."
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Vital="yes" />
+        <ServiceControl Id="ControlSentinelWatchdog"
+                        Name="SentinelWatchdog"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+        <util:ServiceConfig ServiceName="SentinelWatchdog"
+                            FirstFailureActionType="restart"
+                            SecondFailureActionType="restart"
+                            ThirdFailureActionType="restart"
+                            RestartServiceDelayInSeconds="5"
+                            ResetPeriodInDays="1" />
+      </Component>
+
+    </ComponentGroup>
+
+    <ComponentGroup Id="SentinelRuntimePayload" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PayloadDir)\**">
+        <Exclude Files="$(var.PayloadDir)\Sentinel.Server.exe" />
+        <Exclude Files="$(var.PayloadDir)\Sentinel.Admin.exe" />
+        <Exclude Files="$(var.PayloadDir)\Sentinel.Agent.exe" />
+        <Exclude Files="$(var.PayloadDir)\Sentinel.Watchdog.exe" />
+      </Files>
+    </ComponentGroup>
+
+    <ComponentGroup Id="SentinelDefaultRules">
+      <Files Directory="SentinelSigmaRulesDir" Include="$(var.RulesDir)\sigma\**" />
+      <Files Directory="SentinelYaraRulesDir" Include="$(var.RulesDir)\yara\**" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="SentinelIntegrationComponents">
+      <Component Id="SentinelTrayAutoStart" Directory="INSTALLFOLDER" Guid="2B9D7E41-5C18-4A09-B32E-81C4D6F9A102">
+        <RegistryValue Root="HKLM"
+                       Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+                       Name="SentinelTray"
+                       Value="&quot;[INSTALLFOLDER]Sentinel.Tray.exe&quot;"
+                       Type="string"
+                       KeyPath="yes" />
+      </Component>
+
+      <Component Id="SentinelDashboardShortcut" Directory="SentinelProgramMenuFolder" Guid="8E4C1B29-3D5A-4F81-9E12-7A3B5C9D0E14">
+        <util:InternetShortcut Id="DashboardUrlShortcut"
+                               Name="SENTINEL Dashboard"
+                               Target="http://127.0.0.1:5200"
+                               Type="url" />
+        <RemoveFolder Id="RemoveSentinelProgramMenu" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\Sentinel\Installed"
+                       Name="DashboardShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>
