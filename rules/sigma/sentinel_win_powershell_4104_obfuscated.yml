@@ -1,0 +1,38 @@
+# License: MIT — Original rule authored for SENTINEL v2
+title: Obfuscated PowerShell Script Block or AMSI Bypass (Event ID 4104)
+id: 6a100013-5e77-4b21-9c13-000000000013
+status: stable
+description: Detects PowerShell Script Block Logging (Event ID 4104) containing AMSI bypass patterns, reflective Base64 memory execution, or heavy character/backtick obfuscation.
+author: Sentinel Project Contributors
+license: MIT
+date: 2026-01-15
+logsource:
+    product: windows
+    category: ps_script
+detection:
+    selection_amsi_bypass:
+        ScriptBlockText|contains:
+            - 'AmsiUtils'
+            - 'amsiInitFailed'
+            - 'AmsiScanBuffer'
+            - 'System.Management.Automation.Amsi'
+    selection_b64_iex:
+        ScriptBlockText|contains|all:
+            - 'FromBase64String'
+            - 'Invoke-Expression'
+    selection_b64_stream:
+        ScriptBlockText|contains|all:
+            - 'FromBase64String'
+            - 'MemoryStream'
+    selection_obfuscation_re:
+        ScriptBlockText|re: '(?:`[A-Za-z]){4,}|\[char\]\s*\d+\s*\+\s*\[char\]\s*\d+'
+    condition: 1 of selection_*
+falsepositives:
+    - Security testing frameworks or obfuscated commercial PowerShell scripts
+level: high
+tags:
+    - attack.execution
+    - attack.defense_evasion
+    - attack.t1059.001
+    - attack.t1027
+    - attack.t1562.006

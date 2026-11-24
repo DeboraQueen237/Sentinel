@@ -27,6 +27,8 @@ public sealed class WatchdogWorker : BackgroundService
     private readonly string _alertFilePath;
     private readonly string _manifestPath;
     private readonly HashSet<string> _reportedViolations = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _knownInstalledServices = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _reportedDeletedServices = new(StringComparer.OrdinalIgnoreCase);
 
     public WatchdogWorker(IOptions<WatchdogOptions> options, ILogger<WatchdogWorker> logger)
     {
@@ -99,9 +101,30 @@ public sealed class WatchdogWorker : BackgroundService
             {
                 if (!byName.TryGetValue(serviceName, out var sc))
                 {
-                    // Service non installé sur ce poste (ex. exécution console ou poste client sans serveur).
+                    if (_knownInstalledServices.Contains(serviceName) && _reportedDeletedServices.Add(serviceName))
+                    {
+                        var deletedReason = $"ALERTE CRITIQUE : le service Windows « {serviceName} » a été supprimé du gestionnaire de services !";
+                        _logger.LogCritical("ALERTE WATCHDOG : {Reason}", deletedReason);
+                        var deletedEvt = SecurityEvent.Create(
+                            hostId: Environment.MachineName.ToLowerInvariant(),
+                            userId: "SYSTEM",
+                            EventCategory.System,
+                            EventTypes.AgentTampering,
+                            serviceName,
+                            new Dictionary<string, string>
+                            {
+                                [AttributeKeys.Component] = serviceName,
+                                [AttributeKeys.Reason] = deletedReason,
+                                ["watchdog.service.deleted"] = "true"
+                            },
+                            $"component:{serviceName};tampering:service-deleted");
+                        await EmitWatchdogAlertAsync(deletedEvt, deletedReason, ct);
+                    }
                     continue;
                 }
+
+                _knownInstalledServices.Add(serviceName);
+                _reportedDeletedServices.Remove(serviceName);
 
                 sc.Refresh();
                 if (sc.Status is ServiceControllerStatus.Running or ServiceControllerStatus.StartPending)

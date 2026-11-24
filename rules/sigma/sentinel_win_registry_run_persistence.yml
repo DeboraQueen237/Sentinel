@@ -1,0 +1,35 @@
+# License: MIT — Original rule authored for SENTINEL v2
+title: Registry Run Key Persistence Modification
+id: 6a100009-5e77-4b21-9c09-000000000009
+status: stable
+description: Detects creation or modification of Windows Registry Run/RunOnce autostart keys commonly abused for user or system logon persistence.
+author: Sentinel Project Contributors
+license: MIT
+date: 2026-01-15
+logsource:
+    product: windows
+    category: registry_set
+detection:
+    selection_run_key:
+        TargetObject|contains:
+            - '\CurrentVersion\Run\'
+            - '\CurrentVersion\RunOnce\'
+            - '\CurrentVersion\RunServices\'
+            - '\CurrentVersion\Policies\Explorer\Run\'
+    selection_run_root:
+        TargetObject|endswith:
+            - '\CurrentVersion\Run'
+            - '\CurrentVersion\RunOnce'
+    filter_trusted_windows:
+        Details|contains:
+            - 'SecurityHealthSystray.exe'
+            - '\Microsoft\OneDrive\OneDrive.exe'
+            - '\Windows Defender\'
+    condition: (selection_run_key or selection_run_root) and not filter_trusted_windows
+falsepositives:
+    - Legitimate third-party software registering startup helpers during installation
+level: high
+tags:
+    - attack.persistence
+    - attack.t1547
+    - attack.t1547.001

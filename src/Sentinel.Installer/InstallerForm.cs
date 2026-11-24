@@ -56,6 +56,8 @@ public sealed class InstallerForm : Form
         BorderStyle = BorderStyle.FixedSingle
     };
     private readonly CheckBox _chkTray = new() { Text = "Démarrer automatiquement Sentinel.Tray à l'ouverture de session", Checked = true, AutoSize = true };
+    private readonly CheckBox _chkCanaries = new() { Text = "Activer les fichiers canaris anti-ransomware (Documents / Bureau / Téléchargements)", Checked = true, AutoSize = true };
+    private readonly CheckBox _chkFirewall = new() { Text = "Configurer les règles pare-feu locales (boucle 5180/5200 et gRPC 5181)", Checked = true, AutoSize = true };
     private readonly CheckBox _chkStartNow = new() { Text = "Démarrer immédiatement les services et Sentinel.Tray après installation", Checked = true, AutoSize = true };
 
     // Contrôles étape 4 (Progression)
@@ -180,6 +182,22 @@ public sealed class InstallerForm : Form
             ForeColor = Color.FromArgb(203, 213, 225)
         });
 
+        var diag = InstallerCore.DetectEnvironment();
+        panel.Controls.Add(new Label
+        {
+            Text = $"""
+                Diagnostic de ce poste :
+                  • Mémoire détectée : {diag.TotalRamGb:F1} Go — Modèle Ollama conseillé : {diag.RecommendedOllamaModel} (aucun téléchargement automatique)
+                  • Microsoft Defender : {diag.DefenderStatus}
+                  • Sysmon (optionnel, jamais embarqué) : {(diag.SysmonInstalled ? "Détecté et exploitable" : "Absent (non requis)")}
+                  • Ollama local (:11434) : {(diag.OllamaReachable ? $"Disponible ({string.Join(", ", diag.OllamaModels)})" : "Hors ligne (repli déterministe actif)")}
+                """,
+            AutoSize = true,
+            MaximumSize = new Size(680, 0),
+            ForeColor = diag.DefenderRealtimeActive ? Color.FromArgb(134, 239, 172) : Color.FromArgb(251, 191, 36),
+            Margin = new Padding(0, 12, 0, 0)
+        });
+
         if (!InstallerCore.IsElevated())
         {
             var adminHint = new FlowLayoutPanel
@@ -288,7 +306,7 @@ public sealed class InstallerForm : Form
         dirRow.Controls.Add(browseBtn);
         panel.Controls.Add(dirRow);
 
-        foreach (var cb in new[] { _chkCerts, _chkServices, _chkServerSvc, _chkAdminSvc, _chkBrowser, _chkTray, _chkStartNow })
+        foreach (var cb in new[] { _chkCerts, _chkServices, _chkServerSvc, _chkAdminSvc, _chkBrowser, _chkTray, _chkCanaries, _chkFirewall, _chkStartNow })
         {
             cb.ForeColor = Color.FromArgb(226, 232, 240);
             cb.Margin = new Padding(0, 4, 0, 4);
@@ -303,6 +321,8 @@ public sealed class InstallerForm : Form
         _txtExtId.Margin = new Padding(22, 0, 0, 6);
         panel.Controls.Add(_txtExtId);
         panel.Controls.Add(_chkTray);
+        panel.Controls.Add(_chkCanaries);
+        panel.Controls.Add(_chkFirewall);
         panel.Controls.Add(_chkStartNow);
 
         return panel;
@@ -334,7 +354,10 @@ public sealed class InstallerForm : Form
             _txtExtId.Text.Trim(),
             _chkTray.Checked,
             _chkAdminSvc.Checked,
-            _chkStartNow.Checked);
+            _chkStartNow.Checked,
+            SourceDirectory: null,
+            EnableCanaries: _chkCanaries.Checked,
+            ConfigureFirewall: _chkFirewall.Checked);
 
         try
         {

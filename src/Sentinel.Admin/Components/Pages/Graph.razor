@@ -77,6 +77,22 @@
         </select>
     </div>
 
+    <div class="field">
+        <label class="field-label" for="graph-mitre-tactic">Tactique MITRE</label>
+        <select id="graph-mitre-tactic" name="graph-mitre-tactic" class="select" @bind="_tacticFilter" @bind:after="ApplyTacticFilterAsync">
+            <option value="">Toutes les tactiques</option>
+            <option value="Initial Access">Initial Access</option>
+            <option value="Execution">Execution</option>
+            <option value="Persistence">Persistence</option>
+            <option value="Defense Evasion">Defense Evasion</option>
+            <option value="Credential Access">Credential Access</option>
+            <option value="Collection">Collection</option>
+            <option value="Command and Control">Command and Control</option>
+            <option value="Exfiltration">Exfiltration</option>
+            <option value="Impact">Impact</option>
+        </select>
+    </div>
+
     <div class="field" style="flex:0 0 auto;min-width:auto;">
         <label class="field-label">Regroupement</label>
         <button type="button" class="btn @(_groupClusters ? "btn-violet" : "")" @onclick="ToggleGroupingAsync">
@@ -215,9 +231,57 @@
             }
 
             <div class="explain-box" style="padding:12px;">
-                <div class="field-label" style="margin-bottom:4px;">Justification</div>
-                <div style="font-size:12.5px;line-height:1.5;">@_selectedCluster.Justification</div>
+                <div class="field-label" style="margin-bottom:4px;">Récit chronologique &amp; Justification</div>
+                <div style="font-size:12.5px;line-height:1.5;">@(!string.IsNullOrWhiteSpace(_clusterNarrative?.Narrative) ? _clusterNarrative.Narrative : _selectedCluster.Justification)</div>
+                @if (_clusterNarrative is not null && _clusterNarrative.ChainProbability > 0)
+                {
+                    <div class="mono text-cyan" style="font-size:11.5px;margin-top:6px;">Probabilité markovienne : @_clusterNarrative.ChainProbability.ToString("P0")</div>
+                }
             </div>
+
+            @if (_clusterNarrative is not null && _clusterNarrative.Contributions.Count > 0)
+            {
+                <div>
+                    <div class="field-label" style="margin-bottom:4px;">Contributions par moteur</div>
+                    <div class="stack-sm" style="gap:6px;">
+                        @foreach (var c in _clusterNarrative.Contributions)
+                        {
+                            <div class="card-elevated" style="padding:8px 10px;font-size:12px;">
+                                <div class="row-wrap" style="justify-content:space-between;">
+                                    <strong>@c.Engine</strong>
+                                    <span class="mono text-cyan">@c.Score pts</span>
+                                </div>
+                                <div class="text-secondary" style="font-size:11.5px;">@c.Summary</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (_clusterActions.Count > 0)
+            {
+                <div>
+                    <div class="field-label" style="margin-bottom:4px;">Actions associées (annulation 1 clic)</div>
+                    <div class="stack-sm" style="gap:6px;">
+                        @foreach (var act in _clusterActions.Take(4))
+                        {
+                            <div class="card-elevated" style="padding:8px 10px;font-size:12px;">
+                                <div class="row-wrap" style="justify-content:space-between;align-items:center;">
+                                    <span class="mono">@act.Type (@act.Target)</span>
+                                    @if (act.Reversible && act.Status == ActionStatus.Executed)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-danger" @onclick="() => UndoActionAsync(act)">Annuler</button>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge status-fp">@act.Status</span>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
 
             @if (_selectedCluster.ContextKeys.Count > 0)
             {
@@ -304,6 +368,7 @@
     private string _window = "24h";
     private int _minScore = 20;
     private string _hostFilter = string.Empty;
+    private string _tacticFilter = string.Empty;
     private string _selectedClusterKey = string.Empty;
     private string _layout = "cose";
     private bool _groupClusters = true;
@@ -314,6 +379,8 @@
     private GraphNodeDto? _selectedNode;
     private GraphEdgeDto? _selectedEdge;
     private ClusterDto? _selectedCluster;
+    private ClusterNarrativeDto? _clusterNarrative;
+    private List<ActionTicketDto> _clusterActions = new();
 
     private Guid? _lastRouteClusterId;
 
@@ -433,17 +500,66 @@
 
     private Task OnClusterFilterChangedAsync() => LoadGraphAsync();
 
+    private async Task ApplyTacticFilterAsync()
+    {
+        if (_graph is null || string.IsNullOrWhiteSpace(_tacticFilter))
+        {
+            await RenderCytoscapeAsync();
+            return;
+        }
+
+        var matchingCluster = _graph.Clusters.FirstOrDefault(c =>
+            c.MitreTechniques.Any(t => string.Equals(MitreCatalog.TryGet(t)?.Tactic, _tacticFilter, StringComparison.OrdinalIgnoreCase)));
+        if (matchingCluster is not null)
+        {
+            await FocusClusterAsync(matchingCluster);
+        }
+        else
+        {
+            Toasts.Info("Filtre MITRE", $"Aucun cluster actif ne correspond à la tactique « {_tacticFilter} ».");
+        }
+    }
+
     private async Task FocusClusterAsync(ClusterDto cluster)
     {
         _selectedCluster = cluster;
         _selectedNode = null;
         _selectedEdge = null;
         _selectedClusterKey = cluster.Id.ToString();
+        await LoadClusterInspectorDetailsAsync(cluster);
         try
         {
             await JS.InvokeVoidAsync("sentinelGraph.highlightCluster", cluster.Id.ToString());
         }
         catch { }
+    }
+
+    private async Task LoadClusterInspectorDetailsAsync(ClusterDto cluster)
+    {
+        _clusterNarrative = null;
+        _clusterActions.Clear();
+        try
+        {
+            _clusterNarrative = await Api.GetClusterNarrativeAsync(cluster.Id);
+            var actions = await Api.GetActionsAsync(hostId: cluster.HostId, pageSize: 10);
+            _clusterActions = actions.Items.ToList();
+        }
+        catch { /* optionnel */ }
+    }
+
+    private async Task UndoActionAsync(ActionTicketDto action)
+    {
+        try
+        {
+            var reverted = await Api.RevertActionAsync(action.Id);
+            var idx = _clusterActions.FindIndex(a => a.Id == action.Id);
+            if (idx >= 0) _clusterActions[idx] = reverted;
+            Toasts.Success("Action annulée", $"{action.Type} sur {action.Target} révoquée.");
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Danger("Erreur", ex.Message);
+        }
     }
 
     private async Task ClearClusterFocusAsync()

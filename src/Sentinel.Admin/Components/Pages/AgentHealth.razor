@@ -1,0 +1,107 @@
+@page "/health"
+@inject SentinelApiClient Api
+@inject LocalizationService L
+@implements IDisposable
+
+<PageTitle>@L.T("Santé des agents", "Agent Health") — SENTINEL</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">@L.T("Santé des agents & Sources de détection", "Agent Health & Detection Sources")</h1>
+        <p class="page-subtitle">@L.T("CPU, RAM, dernière vue, Microsoft Defender, Sysmon optionnel et état des collecteurs", "CPU, RAM, last seen, Microsoft Defender, optional Sysmon, and collectors status")</p>
+    </div>
+    <div class="page-actions">
+        <button type="button" class="btn btn-primary" @onclick="LoadAsync">@L.T("Actualiser", "Refresh")</button>
+    </div>
+</div>
+
+<ErrorBanner Message="@_error" OnRetry="LoadAsync" />
+
+@if (_agents.Count == 0)
+{
+    <div class="card">
+        <EmptyState Title="@L.T("Aucun agent enregistré", "No agent registered")"
+                    Subtitle="@L.T("Démarrez Sentinel.Agent pour remonter la télémétrie CPU/RAM, Defender et Sysmon.", "Start Sentinel.Agent to report CPU/RAM, Defender, and Sysmon telemetry.")" />
+    </div>
+}
+else
+{
+    <div class="stack-md">
+        @foreach (var a in _agents)
+        {
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="row-wrap" style="gap:8px;">
+                            <span class="pulse-dot @(a.Online ? "online" : "offline")"></span>
+                            <h2 class="card-title">@a.MachineName</h2>
+                            <span class="mono text-muted" style="font-size:12px;">@a.HostId • v@(a.AgentVersion)</span>
+                        </div>
+                        <p class="card-subtitle">@a.OsVersion • @L.T("Vu", "Last seen") @UiFormatters.RelativeTime(a.LastSeen)</p>
+                    </div>
+                    <div class="row-wrap" style="gap:8px;">
+                        <span class="badge @(a.DefenderRealtimeEnabled ? "act-reverted" : "sev-critical")">
+                            Defender: @(a.DefenderRealtimeEnabled ? L.T("Temps réel actif", "Realtime ON") : L.T("Attention / Inactif", "Warning / OFF"))
+                        </span>
+                        <span class="badge @(a.SysmonInstalled ? "sev-low" : "status-fp")">
+                            Sysmon: @(a.SysmonInstalled ? L.T("Installé", "Installed") : L.T("Absent (optionnel)", "Not installed (optional)"))
+                        </span>
+                    </div>
+                </div>
+
+                <div class="grid-3" style="margin-bottom:14px;">
+                    <div class="card-elevated">
+                        <div class="field-label">CPU</div>
+                        <div class="mono" style="font-size:20px;font-weight:700;">@a.CpuPercent.ToString("0.0") %</div>
+                    </div>
+                    <div class="card-elevated">
+                        <div class="field-label">RAM (Working Set)</div>
+                        <div class="mono" style="font-size:20px;font-weight:700;">@a.WorkingSetMb Mo</div>
+                    </div>
+                    <div class="card-elevated">
+                        <div class="field-label">@L.T("File d'attente / Collectés", "Queue / Collected")</div>
+                        <div class="mono" style="font-size:20px;font-weight:700;">@a.QueueLength / @a.EventsCollected.ToString("N0")</div>
+                    </div>
+                </div>
+
+                @if (a.Collectors.Count > 0)
+                {
+                    <div class="field-label" style="margin-bottom:8px;">@L.T("Collecteurs actifs", "Active Collectors")</div>
+                    <div class="row-wrap" style="gap:8px;">
+                        @foreach (var col in a.Collectors)
+                        {
+                            <div class="card-elevated" style="padding:8px 12px;font-size:12px;" title="@col.Error">
+                                <span class="badge @(col.Running ? "act-reverted" : "status-fp")" style="margin-right:6px;">
+                                    @(col.Running ? "ON" : "OFF")
+                                </span>
+                                <strong>@col.Name</strong>
+                                <span class="mono text-muted" style="margin-left:6px;">(@col.EventsProduced)</span>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<AgentHealthDto> _agents = new();
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        L.LanguageChanged += OnLangChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        try { _agents = (await Api.GetAgentsHealthAsync()).ToList(); }
+        catch (SentinelApiException ex) { _error = ex.Message; }
+    }
+
+    private void OnLangChanged(string lang) => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => L.LanguageChanged -= OnLangChanged;
+}

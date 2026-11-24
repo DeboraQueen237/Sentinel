@@ -1,0 +1,6 @@
+<Project>
+  <!-- Isole le projet WiX v5 des proprietes C# (.NET 10 / ManagePackageVersionsCentrally / Analyzers) du repertoire racine -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+</Project>

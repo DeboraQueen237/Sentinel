@@ -284,6 +284,7 @@ public sealed class EventIngestionService : IDisposable
         if (cluster is not null)
         {
             existing = await db.Alerts
+                .AsSplitQuery()
                 .Include(a => a.AlertEvents)
                 .Include(a => a.History)
                 .FirstOrDefaultAsync(a =>
@@ -304,6 +305,7 @@ public sealed class EventIngestionService : IDisposable
                 if (candidateAlertId != Guid.Empty)
                 {
                     existing = await db.Alerts
+                        .AsSplitQuery()
                         .Include(a => a.AlertEvents)
                         .Include(a => a.History)
                         .FirstOrDefaultAsync(a =>
@@ -317,6 +319,7 @@ public sealed class EventIngestionService : IDisposable
         {
             var recentCutoffMs = now.AddMinutes(-30).ToUnixTimeMilliseconds();
             existing = await db.Alerts
+                .AsSplitQuery()
                 .Include(a => a.AlertEvents)
                 .Include(a => a.History)
                 .OrderByDescending(a => a.UpdatedAtUnixMs)

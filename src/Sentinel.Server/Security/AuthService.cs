@@ -18,7 +18,8 @@ public enum AuthFailureKind
     None = 0,
     BadRequest = 1,
     AlreadyConfigured = 2,
-    Unauthorized = 3
+    Unauthorized = 3,
+    LockedOut = 4
 }
 
 public sealed record AuthResult<T>(bool Success, T? Value, AuthFailureKind FailureKind = AuthFailureKind.None, string? ErrorCode = null, string? ErrorMessage = null)
@@ -42,12 +43,16 @@ public sealed class AuthService
     private const int TokenBytes = 32;
     private const int TotpSecretBytes = 20;
     private const int MinPasswordLength = 8;
+    public const int MaxFailedLoginAttempts = 5;
+    public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
 
     private readonly IDbContextFactory<SentinelDbContext> _dbFactory;
     private readonly HashChainWriter _auditWriter;
     private readonly IOptions<SentinelServerOptions> _options;
     private readonly ILogger<AuthService> _logger;
     private readonly SemaphoreSlim _setupGate = new(1, 1);
+    private readonly object _lockoutGate = new();
+    private readonly Dictionary<string, LoginAttemptTracker> _failedAttempts = new(StringComparer.OrdinalIgnoreCase);
 
     public AuthService(
         IDbContextFactory<SentinelDbContext> dbFactory,
@@ -153,6 +158,23 @@ public sealed class AuthService
         }
 
         var usernameInput = request.Username.Trim();
+        var lockoutKey = $"{usernameInput.ToLowerInvariant()}|{ipAddress ?? "local"}";
+
+        if (IsLockedOut(lockoutKey, out var retryUntil))
+        {
+            await _auditWriter.WriteAuditAsync(
+                usernameInput,
+                "AdminLoginLockedOut",
+                $"admin:{usernameInput}",
+                $"Tentative bloquée par verrouillage anti brute-force jusqu'à {retryUntil:O}.",
+                ipAddress,
+                ct).ConfigureAwait(false);
+
+            return AuthResult<LoginResponse>.Fail(
+                AuthFailureKind.LockedOut,
+                "ACCOUNT_LOCKED",
+                $"Compte temporairement verrouillé après {MaxFailedLoginAttempts} échecs consécutifs. Réessayez après {retryUntil:HH:mm:ss} UTC.");
+        }
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         var admin = await db.AdminUsers
@@ -161,6 +183,7 @@ public sealed class AuthService
 
         if (admin is null || !string.Equals(admin.Username, usernameInput, StringComparison.OrdinalIgnoreCase))
         {
+            RecordFailedAttempt(lockoutKey);
             await _auditWriter.WriteAuditAsync(
                 usernameInput,
                 "AdminLoginFailed",
@@ -174,29 +197,41 @@ public sealed class AuthService
 
         if (!VerifyPassword(request.Password, admin.PasswordHash, admin.PasswordSalt))
         {
+            var lockedNow = RecordFailedAttempt(lockoutKey);
             await _auditWriter.WriteAuditAsync(
                 admin.Username,
-                "AdminLoginFailed",
+                lockedNow ? "AdminLoginLockedOut" : "AdminLoginFailed",
                 $"admin:{admin.Username}",
-                "Échec de connexion : mot de passe incorrect.",
+                lockedNow
+                    ? $"Mot de passe incorrect — verrouillage activé pour {LockoutDuration.TotalMinutes:F0} min."
+                    : "Échec de connexion : mot de passe incorrect.",
                 ipAddress,
                 ct).ConfigureAwait(false);
 
-            return AuthResult<LoginResponse>.Fail(AuthFailureKind.Unauthorized, "INVALID_CREDENTIALS", "Identifiants invalides.");
+            return lockedNow
+                ? AuthResult<LoginResponse>.Fail(AuthFailureKind.LockedOut, "ACCOUNT_LOCKED", $"Trop d'échecs consécutifs : compte verrouillé pour {LockoutDuration.TotalMinutes:F0} minutes.")
+                : AuthResult<LoginResponse>.Fail(AuthFailureKind.Unauthorized, "INVALID_CREDENTIALS", "Identifiants invalides.");
         }
 
         if (!VerifyTotp(admin.TotpSecretProtected, request.TotpCode))
         {
+            var lockedNow = RecordFailedAttempt(lockoutKey);
             await _auditWriter.WriteAuditAsync(
                 admin.Username,
-                "AdminLoginFailed",
+                lockedNow ? "AdminLoginLockedOut" : "AdminLoginFailed",
                 $"admin:{admin.Username}",
-                "Échec de connexion : code TOTP invalide.",
+                lockedNow
+                    ? $"Code TOTP invalide — verrouillage activé pour {LockoutDuration.TotalMinutes:F0} min."
+                    : "Échec de connexion : code TOTP invalide.",
                 ipAddress,
                 ct).ConfigureAwait(false);
 
-            return AuthResult<LoginResponse>.Fail(AuthFailureKind.Unauthorized, "INVALID_TOTP", "Code TOTP invalide ou expiré.");
+            return lockedNow
+                ? AuthResult<LoginResponse>.Fail(AuthFailureKind.LockedOut, "ACCOUNT_LOCKED", $"Trop d'échecs consécutifs : compte verrouillé pour {LockoutDuration.TotalMinutes:F0} minutes.")
+                : AuthResult<LoginResponse>.Fail(AuthFailureKind.Unauthorized, "INVALID_TOTP", "Code TOTP invalide ou expiré.");
         }
+
+        ClearFailedAttempts(lockoutKey);
 
         var now = DateTimeOffset.UtcNow;
         if (!admin.TotpConfirmed)
@@ -407,5 +442,68 @@ public sealed class AuthService
         {
             return false;
         }
+    }
+
+    private bool IsLockedOut(string key, out DateTimeOffset until)
+    {
+        var now = DateTimeOffset.UtcNow;
+        lock (_lockoutGate)
+        {
+            if (_failedAttempts.TryGetValue(key, out var tracker) && tracker.LockedUntil is { } locked && locked > now)
+            {
+                until = locked;
+                return true;
+            }
+            until = default;
+            return false;
+        }
+    }
+
+    private bool RecordFailedAttempt(string key)
+    {
+        var now = DateTimeOffset.UtcNow;
+        lock (_lockoutGate)
+        {
+            if (!_failedAttempts.TryGetValue(key, out var tracker))
+            {
+                tracker = new LoginAttemptTracker();
+                _failedAttempts[key] = tracker;
+            }
+
+            if (tracker.LockedUntil is { } locked && locked <= now)
+            {
+                tracker.FailureCount = 0;
+                tracker.LockedUntil = null;
+            }
+
+            if (now - tracker.WindowStart > LockoutDuration)
+            {
+                tracker.FailureCount = 0;
+                tracker.WindowStart = now;
+            }
+
+            tracker.FailureCount++;
+            if (tracker.FailureCount >= MaxFailedLoginAttempts)
+            {
+                tracker.LockedUntil = now + LockoutDuration;
+                return true;
+            }
+            return false;
+        }
+    }
+
+    private void ClearFailedAttempts(string key)
+    {
+        lock (_lockoutGate)
+        {
+            _failedAttempts.Remove(key);
+        }
+    }
+
+    private sealed class LoginAttemptTracker
+    {
+        public int FailureCount { get; set; }
+        public DateTimeOffset WindowStart { get; set; } = DateTimeOffset.UtcNow;
+        public DateTimeOffset? LockedUntil { get; set; }
     }
 }

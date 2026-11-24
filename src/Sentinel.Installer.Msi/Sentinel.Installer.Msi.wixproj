@@ -1,0 +1,17 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">2.0.0</ProductVersion>
+    <OutputName>SentinelSetup-$(ProductVersion)</OutputName>
+    <PayloadDir Condition="'$(PayloadDir)' == ''">..\..\dist\staging\payload</PayloadDir>
+    <RulesDir Condition="'$(RulesDir)' == ''">..\..\rules</RulesDir>
+    <DefineConstants>ProductVersion=$(ProductVersion);PayloadDir=$(PayloadDir);RulesDir=$(RulesDir)</DefineConstants>
+    <Cultures>en-US</Cultures>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
+  </ItemGroup>
+</Project>

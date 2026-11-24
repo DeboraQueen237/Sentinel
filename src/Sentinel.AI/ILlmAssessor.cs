@@ -25,4 +25,8 @@ public interface ILlmAssessor
 
     /// <summary>Met à jour à chaud les paramètres LLM (modèle, endpoint, timeout, concurrence).</summary>
     void UpdateSettings(LlmSettings settings) { }
+
+    /// <summary>Liste les modèles actuellement installés dans Ollama local (<c>/api/tags</c>).</summary>
+    Task<IReadOnlyList<string>> ListInstalledModelsAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
 }

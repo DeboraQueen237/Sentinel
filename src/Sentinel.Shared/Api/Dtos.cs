@@ -139,8 +139,8 @@ public sealed record GraphDto(
     IReadOnlyList<ClusterDto> Clusters);
 
 // ----------------------------------------------------------------------------- Tableau de bord
+/// <summary>Synthèse globale du tableau de bord (<c>GlobalSecurityScore</c> : 0..100, 100 = sain).</summary>
 public sealed record DashboardSummaryDto(
-    /// <summary>Score de sécurité global 0..100 (100 = sain).</summary>
     int GlobalSecurityScore,
     int ActiveAlerts,
     int CriticalAlerts,
@@ -250,3 +250,131 @@ public sealed record ScenarioMetricDto(
     double SecondsToDetect,
     int PeakScore,
     int FalsePositives);
+
+// ----------------------------------------------------------------------------- Extensions v2 (M1–M11)
+public sealed record CollectorHealthDto(string Name, bool Running, string? Error, long EventsProduced);
+
+public sealed record AgentHealthDto(
+    string HostId,
+    string MachineName,
+    string OsVersion,
+    string AgentVersion,
+    bool Online,
+    DateTimeOffset LastSeen,
+    double CpuPercent,
+    long WorkingSetMb,
+    int QueueLength,
+    long EventsCollected,
+    bool DefenderActive,
+    bool DefenderRealtimeEnabled,
+    bool SysmonInstalled,
+    IReadOnlyList<CollectorHealthDto> Collectors);
+
+public sealed record ThreatIntelFeedDto(
+    string Name,
+    string License,
+    bool Enabled,
+    bool Online,
+    DateTimeOffset? LastUpdated,
+    int IndicatorCount,
+    string? LastError);
+
+public sealed record ThreatIntelStatusDto(
+    int TotalIndicators,
+    int HashCount,
+    int DomainCount,
+    int UrlCount,
+    int IpCount,
+    DateTimeOffset? LastRefresh,
+    bool OfflineMode,
+    IReadOnlyList<ThreatIntelFeedDto> Feeds);
+
+public sealed record ThreatIntelLookupDto(
+    bool Found,
+    string IndicatorType,
+    string Indicator,
+    string? Source,
+    string? ThreatType,
+    DateTimeOffset? FirstSeen,
+    DateTimeOffset? ExpiresAt,
+    int SuggestedScore,
+    string Justification,
+    double ElapsedMs);
+
+public sealed record RuleSummaryDto(
+    string Id,
+    string Engine,
+    string Title,
+    string Level,
+    bool Enabled,
+    string SourceFile,
+    IReadOnlyList<string> MitreTechniques,
+    long MatchCount,
+    string? Description);
+
+public sealed record RuleToggleRequest(bool Enabled);
+
+public sealed record RulesReloadResultDto(int SigmaCount, int YaraCount, IReadOnlyList<string> Errors, DateTimeOffset ReloadedAt);
+
+public sealed record StaticScanRequest(string FilePath);
+
+public sealed record StaticScanResultDto(
+    string FilePath,
+    string Sha256,
+    long SizeBytes,
+    bool IsPe,
+    bool Signed,
+    string? Publisher,
+    double MaxEntropy,
+    string? ProbablePacker,
+    bool TimestampAnomaly,
+    IReadOnlyList<string> SuspiciousImports,
+    IReadOnlyList<string> YaraMatches,
+    string YaraEngine,
+    double? MlMaliciousProbability,
+    IReadOnlyList<string> MlTopFeatures,
+    int CombinedScore,
+    double ElapsedMs,
+    string? Error);
+
+public sealed record MlModelStatusDto(
+    bool Loaded,
+    string Version,
+    string Algorithm,
+    DateTimeOffset? TrainedAt,
+    double Auc,
+    double RecallAt01Fpr,
+    double F1Score,
+    int FeatureCount,
+    string DatasetNotice,
+    string ModelPath);
+
+public sealed record CanaryStatusDto(
+    string Id,
+    string HostId,
+    string FilePath,
+    string Folder,
+    string ExpectedSha256,
+    long SizeBytes,
+    bool Intact,
+    DateTimeOffset DeployedAt,
+    DateTimeOffset? LastCheckedAt,
+    string Status);
+
+public sealed record FeedbackHistoryEntryDto(
+    Guid Id,
+    DateTimeOffset RecordedAt,
+    string Actor,
+    Guid? AlertId,
+    Guid? ClusterId,
+    bool IsFalsePositive,
+    string? Comment,
+    bool Reverted,
+    DateTimeOffset? RevertedAt);
+
+public sealed record ClusterNarrativeDto(
+    Guid ClusterId,
+    string Narrative,
+    double ChainProbability,
+    IReadOnlyList<string> MitreTactics,
+    IReadOnlyList<ScoreContribution> Contributions);

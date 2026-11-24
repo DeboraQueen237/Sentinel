@@ -471,6 +471,7 @@ $RECYCLE.BIN/
 # Windows Installer files
 *.cab
 *.msi
+!src/Sentinel.Installer.Msi/
 *.msix
 *.msm
 *.msp

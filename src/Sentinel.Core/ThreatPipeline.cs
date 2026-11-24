@@ -8,8 +8,11 @@ using Sentinel.Core.Correlation;
 using Sentinel.Core.Decision;
 using Sentinel.Core.Enrichment;
 using Sentinel.Core.Scoring;
+using Sentinel.Detection.Sigma;
+using Sentinel.ML;
 using Sentinel.Shared.Api;
 using Sentinel.Shared.Models;
+using Sentinel.ThreatIntel;
 
 namespace Sentinel.Core;
 
@@ -38,6 +41,7 @@ public sealed class ThreatPipeline : IThreatPipeline
     private readonly Dictionary<string, LinkedList<RecentEventSummary>> _recentByHost = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, SecurityEvent> _eventLookup = new();
     private readonly Queue<Guid> _eventLookupOrder = new();
+    private readonly List<FeedbackHistoryEntryDto> _feedbackHistory = new();
 
     private volatile SentinelSettings _settings;
     private long _eventsProcessed;
@@ -47,7 +51,10 @@ public sealed class ThreatPipeline : IThreatPipeline
         SentinelSettings initialSettings,
         ILlmAssessor llm,
         ILoggerFactory? loggerFactory = null,
-        TimeProvider? clock = null)
+        TimeProvider? clock = null,
+        ISigmaEngine? sigma = null,
+        IReputationService? threatIntel = null,
+        IPeMlClassifier? mlClassifier = null)
     {
         ArgumentNullException.ThrowIfNull(initialSettings);
         ArgumentNullException.ThrowIfNull(llm);
@@ -64,7 +71,7 @@ public sealed class ThreatPipeline : IThreatPipeline
         _preFilter = new EventPreFilter(_reputation);
         _ruleEngine = new RuleEngine();
         _baseline = new BehavioralBaseline();
-        _hybridScorer = new HybridScorer(_preFilter, _ruleEngine, _baseline, _llm, lf.CreateLogger<HybridScorer>());
+        _hybridScorer = new HybridScorer(_preFilter, _ruleEngine, _baseline, _llm, lf.CreateLogger<HybridScorer>(), sigma, threatIntel, mlClassifier);
         _correlation = new CorrelationEngine();
         _decision = new DecisionEngine();
     }
@@ -210,8 +217,60 @@ public sealed class ThreatPipeline : IThreatPipeline
             }
         }
 
-        _logger.LogInformation("Retour analyste appliqué ({Count} événements, fauxPositif={Fp}).",
-            resolvedEvents.Count, feedback.IsFalsePositive);
+        // Mise à jour probabiliste du modèle markovien (réversible via FeedbackId)
+        if (resolvedEvents.Count >= 2)
+        {
+            var orderedCats = resolvedEvents.OrderBy(e => e.Timestamp).Select(e => e.Category).ToArray();
+            _correlation.MarkovModel.ApplyFeedback(feedback.FeedbackId, orderedCats, feedback.IsFalsePositive);
+        }
+
+        lock (_contextGate)
+        {
+            _feedbackHistory.Add(new FeedbackHistoryEntryDto(
+                feedback.FeedbackId,
+                feedback.RecordedAt,
+                "Admin",
+                feedback.AlertId,
+                feedback.ClusterId,
+                feedback.IsFalsePositive,
+                feedback.Comment,
+                Reverted: false,
+                RevertedAt: null));
+
+            if (_feedbackHistory.Count > 500)
+            {
+                _feedbackHistory.RemoveAt(0);
+            }
+        }
+
+        _logger.LogInformation("Retour analyste appliqué ({Count} événements, fauxPositif={Fp}, id={Id}).",
+            resolvedEvents.Count, feedback.IsFalsePositive, feedback.FeedbackId);
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<FeedbackHistoryEntryDto> GetFeedbackHistory()
+    {
+        lock (_contextGate)
+        {
+            return _feedbackHistory.OrderByDescending(f => f.RecordedAt).ToArray();
+        }
+    }
+
+    /// <inheritdoc />
+    public bool RevertFeedback(Guid feedbackId)
+    {
+        var revertedMarkov = _correlation.MarkovModel.RevertFeedback(feedbackId);
+        lock (_contextGate)
+        {
+            var idx = _feedbackHistory.FindIndex(f => f.Id == feedbackId && !f.Reverted);
+            if (idx < 0) return revertedMarkov;
+            _feedbackHistory[idx] = _feedbackHistory[idx] with
+            {
+                Reverted = true,
+                RevertedAt = _clock.GetUtcNow()
+            };
+            return true;
+        }
     }
 
     /// <inheritdoc />
@@ -434,6 +493,58 @@ public sealed class ThreatPipeline : IThreatPipeline
         EnableClipboardMonitoring = s.EnableClipboardMonitoring,
         EnableTypingRhythm = s.EnableTypingRhythm,
         EnableBrowserMonitoring = s.EnableBrowserMonitoring,
-        EnableNetworkMonitoring = s.EnableNetworkMonitoring
+        EnableNetworkMonitoring = s.EnableNetworkMonitoring,
+        EnableDefenderCollector = s.EnableDefenderCollector,
+        EnableSysmonCollector = s.EnableSysmonCollector,
+        Canaries = new CanarySettings
+        {
+            Enabled = s.Canaries.Enabled,
+            FilesPerFolder = s.Canaries.FilesPerFolder,
+            Folders = new List<string>(s.Canaries.Folders),
+            AutoIsolateOnTrigger = s.Canaries.AutoIsolateOnTrigger
+        },
+        ScriptVisibility = new ScriptVisibilitySettings
+        {
+            Enabled = s.ScriptVisibility.Enabled,
+            EnablePowerShell4104 = s.ScriptVisibility.EnablePowerShell4104,
+            EnableEtwAmsi = s.ScriptVisibility.EnableEtwAmsi,
+            StoreSanitizedExcerpt = s.ScriptVisibility.StoreSanitizedExcerpt,
+            MaxExcerptLength = s.ScriptVisibility.MaxExcerptLength
+        },
+        ThreatIntel = new ThreatIntelSettings
+        {
+            Enabled = s.ThreatIntel.Enabled,
+            EnableAbuseChFeeds = s.ThreatIntel.EnableAbuseChFeeds,
+            EnableOpenPhishCommunity = s.ThreatIntel.EnableOpenPhishCommunity,
+            EnablePhishTank = s.ThreatIntel.EnablePhishTank,
+            EnableVirusTotalOnDemand = s.ThreatIntel.EnableVirusTotalOnDemand,
+            RefreshIntervalHours = s.ThreatIntel.RefreshIntervalHours,
+            IndicatorTtlDays = s.ThreatIntel.IndicatorTtlDays
+        },
+        StaticScan = new StaticScanSettings
+        {
+            Enabled = s.StaticScan.Enabled,
+            ScanOnFileEvent = s.StaticScan.ScanOnFileEvent,
+            ScanOnProcessStart = s.StaticScan.ScanOnProcessStart,
+            MaxFileSizeBytes = s.StaticScan.MaxFileSizeBytes,
+            TimeoutMs = s.StaticScan.TimeoutMs,
+            MaxConcurrency = s.StaticScan.MaxConcurrency,
+            ScheduledScanIntervalHours = s.StaticScan.ScheduledScanIntervalHours
+        },
+        Rules = new RulesSettings
+        {
+            EnableSigma = s.Rules.EnableSigma,
+            EnableYara = s.Rules.EnableYara,
+            HotReload = s.Rules.HotReload,
+            DisabledRuleIds = new List<string>(s.Rules.DisabledRuleIds),
+            ExcludedRuleTargets = new List<string>(s.Rules.ExcludedRuleTargets)
+        },
+        MachineLearning = new MlSettings
+        {
+            Enabled = s.MachineLearning.Enabled,
+            MaxScoreContribution = s.MachineLearning.MaxScoreContribution,
+            SuspiciousProbabilityThreshold = s.MachineLearning.SuspiciousProbabilityThreshold
+        },
+        Language = s.Language
     };
 }

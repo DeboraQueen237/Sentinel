@@ -1,11 +1,14 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Net.Http;
 using System.Reflection;
 using System.Security.Principal;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Win32;
 using Sentinel.Shared.Infrastructure;
 using Sentinel.Shared.Json;
+using Sentinel.Shared.Models;
 using Sentinel.Shared.Security;
 
 namespace Sentinel.Installer;
@@ -20,6 +23,16 @@ public sealed record ConsentRecord(
     IReadOnlyList<string> ExplicitExclusions,
     string SignatureSha256);
 
+/// <summary>Diagnostic pré-installation de l'environnement Windows (Defender, Sysmon, Ollama, RAM).</summary>
+public sealed record EnvironmentDiagnostic(
+    double TotalRamGb,
+    bool DefenderRealtimeActive,
+    string DefenderStatus,
+    bool SysmonInstalled,
+    bool OllamaReachable,
+    IReadOnlyList<string> OllamaModels,
+    string RecommendedOllamaModel);
+
 public sealed record InstallOptions(
     string InstallDirectory,
     bool GenerateCertificates,
@@ -30,15 +43,18 @@ public sealed record InstallOptions(
     bool RegisterTrayAutoStart,
     bool InstallAdminService = false,
     bool StartAfterInstall = false,
-    string? SourceDirectory = null);
+    string? SourceDirectory = null,
+    bool EnableCanaries = true,
+    bool ConfigureFirewall = true,
+    bool CreateDashboardShortcut = true);
 
 /// <summary>
-/// Moteur d'installation et de désinstallation réutilisé par l'assistant graphique WinForms
+/// Moteur d'installation et de désinstallation SENTINEL v2 réutilisé par l'assistant graphique WinForms
 /// et par le mode ligne de commande (CLI).
 /// </summary>
 public static class InstallerCore
 {
-    public const string ProductVersion = "1.0.0";
+    public const string ProductVersion = "2.0.0";
     public const string NativeHostName = "com.sentinel.browserhost";
     public const string EmbeddedPayloadResourceName = "Sentinel.Installer.payload.zip";
 
@@ -46,12 +62,12 @@ public static class InstallerCore
     [
         "Processus : lancement, arrêt, chemin, hash SHA-256, parent, signature Authenticode (sans contenu mémoire).",
         "Réseau : connexions actives, IP/port/domaine résolu, volumes émis/reçus (sans contenu des paquets).",
-        "Presse-papiers : détection en mémoire d'URLs, raccourcisseurs ou motifs de commande (seuls type, domaine et hash SHA-256 sont conservés).",
-        "Fichiers : création/modification/renommage dans les dossiers surveillés, extension, taille, entropie et double extension (sans lecture du contenu des documents).",
-        "Sessions : ouverture, fermeture, verrouillage, échecs d'authentification (sans mots de passe).",
-        "Périphériques : branchement USB / HID, VID/PID, classe et nom (sans contenu des supports).",
-        "Navigation : domaine, redirections et téléchargements via extension dédiée (sans contenu des pages ni formulaires).",
-        "Dynamique de saisie : statistiques de rythme et drapeau d'injection uniquement (JAMAIS les touches frappées)."
+        "Presse-papiers : détection en mémoire d'URLs ou motifs de commande (seuls type, domaine et hash SHA-256 sont conservés).",
+        "Fichiers & Canaris : création/modification/renommage dans les dossiers surveillés et fichiers leurres anti-ransomware (sans lecture du contenu des documents).",
+        "Microsoft Defender & Sysmon optionnel : détections Defender, affaiblissement de la protection, journal Sysmon s'il est déjà installé (Sysmon jamais embarqué).",
+        "Visibilité scripts PowerShell 4104 : métadonnées, hash SHA-256 et indicateurs d'obfuscation (extrait tronqué avec caviardage désactivé par défaut).",
+        "Analyse statique YARA / PE / ML & Threat Intel locale : métadonnées PE, correspondances règles locales et indicateurs publics (hors-ligne).",
+        "Sessions, Périphériques USB, Navigation (extension) et Statistiques de cadence de saisie (JAMAIS les touches frappées)."
     ];
 
     public static readonly IReadOnlyList<string> ExplicitExclusions =
@@ -59,8 +75,9 @@ public static class InstallerCore
         "Aucun enregistrement des touches frappées (aucun keylogger).",
         "Aucun stockage du texte brut du presse-papiers ni des mots de passe.",
         "Aucune lecture ni conservation du contenu des documents utilisateur.",
-        "Aucun accès au contenu des messageries chiffrées (WhatsApp, Signal, etc.).",
-        "Aucun transfert vers Internet : analyse, stockage et IA (Ollama) 100 % locaux."
+        "Aucun accès au contenu des messageries chiffrées (WhatsApp, Signal, Teams, etc.).",
+        "Aucun transfert de données utilisateur vers le cloud : analyse, ML et IA locale (Ollama) 100 % locaux.",
+        "Aucune suppression définitive automatique : toute action automatique est réversible en un clic."
     ];
 
     public static bool IsElevated()
@@ -74,13 +91,103 @@ public static class InstallerCore
     {
         var asm = Assembly.GetExecutingAssembly();
         if (asm.GetManifestResourceInfo(EmbeddedPayloadResourceName) is not null)
-        {
             return true;
-        }
 
         var baseDir = AppContext.BaseDirectory;
         return File.Exists(Path.Combine(baseDir, "payload.zip"))
                || Directory.Exists(Path.Combine(baseDir, "payload"));
+    }
+
+    /// <summary>
+    /// Analyse l'environnement local avant installation : RAM, Microsoft Defender, Sysmon (optionnel) et Ollama local.
+    /// Ne télécharge jamais aucun modèle ni composant externe sans action explicite de l'utilisateur.
+    /// </summary>
+    public static EnvironmentDiagnostic DetectEnvironment()
+    {
+        var ramGb = Math.Round(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / (1024.0 * 1024.0 * 1024.0), 1);
+        var recommendedModel = ramGb <= 8.5 ? "qwen2.5-coder:1.5b"
+            : ramGb <= 20.0 ? "qwen2.5-coder:3b"
+            : "qwen2.5:7b";
+
+        // 1. Microsoft Defender
+        var defenderActive = false;
+        var defenderStatus = "Statut inconnu";
+        try
+        {
+            using var rtKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows Defender\Real-Time Protection");
+            var disabled = rtKey?.GetValue("DisableRealtimeMonitoring");
+            var isDisabled = disabled is int i && i == 1;
+
+            using var svcKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\WinDefend");
+            var svcExists = svcKey is not null;
+
+            defenderActive = svcExists && !isDisabled;
+            defenderStatus = !svcExists
+                ? "Service WinDefend introuvable — vérifiez votre antivirus"
+                : isDisabled
+                    ? "ATTENTION : protection temps réel désactivée !"
+                    : "Actif (protection temps réel détectée)";
+        }
+        catch
+        {
+            defenderStatus = "Vérification impossible sans privilèges complets";
+        }
+
+        // 2. Sysmon optionnel (jamais embarqué)
+        var sysmonInstalled = false;
+        try
+        {
+            using var s64 = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\Sysmon64");
+            using var s32 = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\Sysmon");
+            sysmonInstalled = s64 is not null || s32 is not null;
+        }
+        catch { /* ignoré */ }
+
+        // 3. Ollama local (http://localhost:11434/api/tags — timeout court 2 s)
+        var ollamaReachable = false;
+        var models = new List<string>();
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            var resp = http.GetAsync("http://localhost:11434/api/tags").GetAwaiter().GetResult();
+            if (resp.IsSuccessStatusCode)
+            {
+                ollamaReachable = true;
+                var json = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("models", out var arr) && arr.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in arr.EnumerateArray())
+                    {
+                        if (item.TryGetProperty("name", out var nameProp))
+                        {
+                            var name = nameProp.GetString();
+                            if (!string.IsNullOrWhiteSpace(name))
+                                models.Add(name);
+                        }
+                    }
+                }
+            }
+        }
+        catch { /* Ollama optionnel */ }
+
+        if (models.Any(m => m.StartsWith("qwen2.5-coder:3b", StringComparison.OrdinalIgnoreCase)))
+        {
+            recommendedModel = "qwen2.5-coder:3b";
+        }
+        else if (models.Count > 0 && !models.Any(m => m.Equals(recommendedModel, StringComparison.OrdinalIgnoreCase)))
+        {
+            recommendedModel = $"{recommendedModel} (installé : {models[0]})";
+        }
+
+        return new EnvironmentDiagnostic(
+            ramGb,
+            defenderActive,
+            defenderStatus,
+            sysmonInstalled,
+            ollamaReachable,
+            models,
+            recommendedModel);
     }
 
     public static ConsentRecord WriteSignedConsent(Action<string>? log = null)
@@ -93,13 +200,7 @@ public static class InstallerCore
         var signature = HashChain.Sha256Hex(payload);
 
         var record = new ConsentRecord(
-            now,
-            user,
-            machine,
-            ProductVersion,
-            ClosedChannelList,
-            ExplicitExclusions,
-            signature);
+            now, user, machine, ProductVersion, ClosedChannelList, ExplicitExclusions, signature);
 
         File.WriteAllText(SentinelPaths.ConsentFile, SentinelJson.Serialize(record), new UTF8Encoding(false));
         log?.Invoke($"Consentement signé enregistré dans {SentinelPaths.ConsentFile}.");
@@ -111,6 +212,13 @@ public static class InstallerCore
         Directory.CreateDirectory(opts.InstallDirectory);
         log?.Invoke($"Répertoire d'installation préparé : {opts.InstallDirectory}");
 
+        var diag = DetectEnvironment();
+        log?.Invoke($"Diagnostic poste : RAM={diag.TotalRamGb:F1} Go | Defender={diag.DefenderStatus} | Sysmon={(diag.SysmonInstalled ? "Installé" : "Absent (optionnel)")} | Ollama={(diag.OllamaReachable ? string.Join(", ", diag.OllamaModels) : "Hors ligne")}");
+        if (!diag.DefenderRealtimeActive)
+        {
+            log?.Invoke("AVERTISSEMENT : Microsoft Defender semble inactif. SENTINEL complète Defender mais ne le remplace pas.");
+        }
+
         WriteSignedConsent(log);
 
         var deployedFiles = DeployBinaries(opts, log);
@@ -119,6 +227,7 @@ public static class InstallerCore
             log?.Invoke($"{deployedFiles} fichier(s) applicatif(s) déployé(s) dans {opts.InstallDirectory}.");
         }
 
+        DeployDefaultRules(opts.InstallDirectory, log);
         CopySelfForUninstall(opts.InstallDirectory, log);
 
         if (opts.GenerateCertificates)
@@ -127,7 +236,15 @@ public static class InstallerCore
             log?.Invoke($"Certificats PKI mTLS générés dans {SentinelPaths.Certificates}.");
         }
 
+        var acl = DirectorySecurityHardener.HardenDirectory(SentinelPaths.Root);
+        log?.Invoke($"Durcissement ACL NTFS ({SentinelPaths.Root}) : {acl.Message}");
+
         GenerateIntegrityManifest(opts.InstallDirectory, log);
+
+        if (opts.ConfigureFirewall)
+        {
+            ConfigureLocalFirewallRules(log);
+        }
 
         if (opts.InstallServices)
         {
@@ -172,14 +289,84 @@ public static class InstallerCore
             RegisterTrayAutoStart(opts.InstallDirectory, log);
         }
 
+        if (opts.CreateDashboardShortcut)
+        {
+            CreateStartMenuDashboardShortcut(log);
+        }
+
         RegisterUninstallEntry(opts.InstallDirectory, log);
+
+        log?.Invoke($"Mode initial par défaut : Learning (7 jours), Canaris={(opts.EnableCanaries ? "activés" : "désactivés")}.");
 
         if (opts.StartAfterInstall)
         {
             StartInstalledComponents(opts, log);
         }
 
-        log?.Invoke("Installation SENTINEL terminée avec succès.");
+        log?.Invoke($"Installation SENTINEL v{ProductVersion} terminée avec succès.");
+    }
+
+    private static void DeployDefaultRules(string installDir, Action<string>? log)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(installDir, "rules"),
+            Path.Combine(AppContext.BaseDirectory, "rules")
+        };
+
+        var rulesRoot = candidates.FirstOrDefault(Directory.Exists);
+        if (rulesRoot is null)
+            return;
+
+        var sigmaSrc = Path.Combine(rulesRoot, "sigma");
+        if (Directory.Exists(sigmaSrc))
+        {
+            var count = CopyDirectoryRecursive(sigmaSrc, SentinelPaths.SigmaRules);
+            log?.Invoke($"{count} règle(s) Sigma déployée(s) dans {SentinelPaths.SigmaRules}.");
+        }
+
+        var yaraSrc = Path.Combine(rulesRoot, "yara");
+        if (Directory.Exists(yaraSrc))
+        {
+            var count = CopyDirectoryRecursive(yaraSrc, SentinelPaths.YaraRules);
+            log?.Invoke($"{count} règle(s) YARA déployée(s) dans {SentinelPaths.YaraRules}.");
+        }
+    }
+
+    private static void ConfigureLocalFirewallRules(Action<string>? log)
+    {
+        if (!IsElevated())
+        {
+            log?.Invoke("Règles pare-feu ignorées (élévation Administrateur requise).");
+            return;
+        }
+
+        RunNetsh(["advfirewall", "firewall", "delete", "rule", "name=\"Sentinel-API-Loopback\""], log);
+        RunNetsh(["advfirewall", "firewall", "add", "rule", "name=\"Sentinel-API-Loopback\"", "dir=in", "action=allow", "protocol=TCP", "localport=5180,5200", "remoteip=127.0.0.1"], log);
+
+        RunNetsh(["advfirewall", "firewall", "delete", "rule", "name=\"Sentinel-gRPC-Local\""], log);
+        RunNetsh(["advfirewall", "firewall", "add", "rule", "name=\"Sentinel-gRPC-Local\"", "dir=in", "action=allow", "protocol=TCP", "localport=5181", "remoteip=127.0.0.1"], log);
+
+        log?.Invoke("Règles pare-feu Windows configurées (boucle locale 5180/5200 et gRPC 5181).");
+    }
+
+    private static void CreateStartMenuDashboardShortcut(Action<string>? log)
+    {
+        try
+        {
+            var programs = IsElevated()
+                ? Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms)
+                : Environment.GetFolderPath(Environment.SpecialFolder.Programs);
+            var folder = Path.Combine(programs, "SENTINEL");
+            Directory.CreateDirectory(folder);
+            var urlFile = Path.Combine(folder, "SENTINEL Dashboard.url");
+            File.WriteAllText(urlFile, $"[InternetShortcut]\r\nURL={SentinelEndpoints.AdminUrl}\r\n", Encoding.ASCII);
+            log?.Invoke($"Raccourci Menu Démarrer créé : {urlFile}");
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"Avertissement création raccourci dashboard : {ex.Message}");
+        }
     }
 
     private static int DeployBinaries(InstallOptions opts, Action<string>? log)
@@ -225,17 +412,13 @@ public static class InstallerCore
         var count = 0;
         var fullTarget = Path.GetFullPath(targetDir);
         if (!fullTarget.EndsWith(Path.DirectorySeparatorChar))
-        {
             fullTarget += Path.DirectorySeparatorChar;
-        }
 
         foreach (var entry in archive.Entries)
         {
             var destPath = Path.GetFullPath(Path.Combine(fullTarget, entry.FullName));
             if (!destPath.StartsWith(fullTarget, StringComparison.OrdinalIgnoreCase))
-            {
                 continue;
-            }
 
             if (string.IsNullOrEmpty(entry.Name))
             {
@@ -257,9 +440,7 @@ public static class InstallerCore
         var srcFull = Path.GetFullPath(sourceDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var dstFull = Path.GetFullPath(destDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         if (string.Equals(srcFull, dstFull, StringComparison.OrdinalIgnoreCase))
-        {
             return 0;
-        }
 
         Directory.CreateDirectory(dstFull);
 
@@ -287,24 +468,19 @@ public static class InstallerCore
         {
             var currentExe = Environment.ProcessPath;
             if (string.IsNullOrWhiteSpace(currentExe) || !File.Exists(currentExe))
-            {
                 return;
-            }
 
             var targetExe = Path.Combine(installDir, "Sentinel.Installer.exe");
             if (!string.Equals(Path.GetFullPath(currentExe), Path.GetFullPath(targetExe), StringComparison.OrdinalIgnoreCase))
             {
                 File.Copy(currentExe, targetExe, overwrite: true);
-
                 var baseName = Path.GetFileNameWithoutExtension(currentExe);
                 var sourceDir = Path.GetDirectoryName(currentExe)!;
                 foreach (var ext in new[] { ".dll", ".deps.json", ".runtimeconfig.json" })
                 {
                     var sidecar = Path.Combine(sourceDir, baseName + ext);
                     if (File.Exists(sidecar))
-                    {
                         File.Copy(sidecar, Path.Combine(installDir, "Sentinel.Installer" + ext), overwrite: true);
-                    }
                 }
             }
         }
@@ -324,18 +500,10 @@ public static class InstallerCore
                 var ext = Path.GetExtension(file);
                 if (!ext.Equals(".exe", StringComparison.OrdinalIgnoreCase) &&
                     !ext.Equals(".dll", StringComparison.OrdinalIgnoreCase))
-                {
                     continue;
-                }
 
-                try
-                {
-                    hashes[Path.GetFileName(file)] = HashChain.Sha256File(file);
-                }
-                catch
-                {
-                    // Ignoré si fichier verrouillé.
-                }
+                try { hashes[Path.GetFileName(file)] = HashChain.Sha256File(file); }
+                catch { /* Ignoré si verrouillé */ }
             }
         }
 
@@ -394,10 +562,7 @@ public static class InstallerCore
                 lmKey?.SetValue(null, manifestFile, RegistryValueKind.String);
                 log?.Invoke($"Native Messaging enregistré : HKLM\\{path}");
             }
-            catch
-            {
-                // HKLM exige l'élévation Administrateur ; HKCU suffit pour la session utilisateur.
-            }
+            catch { /* HKLM exige élévation */ }
         }
     }
 
@@ -438,10 +603,7 @@ public static class InstallerCore
                 log?.Invoke($"Entrée Ajout/Suppression de programmes enregistrée ({root.Name}\\{uninstallKeyPath}).");
                 return;
             }
-            catch
-            {
-                // HKLM peut refuser sans élévation ; repli sur HKCU.
-            }
+            catch { /* repli HKCU */ }
         }
     }
 
@@ -473,7 +635,7 @@ public static class InstallerCore
         }
     }
 
-    public static void Uninstall(Action<string>? log = null)
+    public static void Uninstall(Action<string>? log = null, bool deleteData = false)
     {
         foreach (var svc in new[]
         {
@@ -487,6 +649,12 @@ public static class InstallerCore
             RunSc(["delete", svc], log);
         }
 
+        if (IsElevated())
+        {
+            RunNetsh(["advfirewall", "firewall", "delete", "rule", "name=\"Sentinel-API-Loopback\""], log);
+            RunNetsh(["advfirewall", "firewall", "delete", "rule", "name=\"Sentinel-gRPC-Local\""], log);
+        }
+
         try
         {
             using var runKey = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", writable: true);
@@ -496,6 +664,16 @@ public static class InstallerCore
         catch (Exception ex)
         {
             log?.Invoke($"Avertissement retrait démarrage auto : {ex.Message}");
+        }
+
+        foreach (var sp in new[] { Environment.SpecialFolder.CommonPrograms, Environment.SpecialFolder.Programs })
+        {
+            try
+            {
+                var dir = Path.Combine(Environment.GetFolderPath(sp), "SENTINEL");
+                if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+            }
+            catch { /* ignoré */ }
         }
 
         string[] regPaths =
@@ -514,8 +692,28 @@ public static class InstallerCore
         try { Registry.LocalMachine.DeleteSubKeyTree(uninstallKeyPath, throwOnMissingSubKey: false); } catch { /* ignoré */ }
         try { Registry.CurrentUser.DeleteSubKeyTree(uninstallKeyPath, throwOnMissingSubKey: false); } catch { /* ignoré */ }
 
-        log?.Invoke("Enregistrements Native Messaging Chrome & Edge et entrée Windows supprimés.");
-        log?.Invoke("Désinstallation terminée.");
+        if (deleteData)
+        {
+            try
+            {
+                var dataRoot = SentinelPaths.Root;
+                if (Directory.Exists(dataRoot))
+                {
+                    Directory.Delete(dataRoot, recursive: true);
+                    log?.Invoke($"Données locales supprimées : {dataRoot}");
+                }
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke($"Avertissement suppression des données : {ex.Message}");
+            }
+        }
+        else
+        {
+            log?.Invoke($"Données locales conservées dans {SentinelPaths.Root} (passez --delete-data pour les purger).");
+        }
+
+        log?.Invoke("Désinstallation SENTINEL v2 terminée.");
     }
 
     private static void InstallWindowsService(string serviceName, string displayName, string binaryPath, Action<string>? log)
@@ -531,13 +729,16 @@ public static class InstallerCore
         log?.Invoke($"Service Windows {serviceName} configuré (redémarrage automatique sur panne).");
     }
 
-    private static void RunSc(string[] args, Action<string>? log)
+    private static void RunSc(string[] args, Action<string>? log) => RunSystemTool("sc.exe", args, log);
+    private static void RunNetsh(string[] args, Action<string>? log) => RunSystemTool("netsh.exe", args, log);
+
+    private static void RunSystemTool(string exeName, string[] args, Action<string>? log)
     {
         try
         {
             var psi = new ProcessStartInfo
             {
-                FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "sc.exe"),
+                FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), exeName),
                 Arguments = string.Join(" ", args),
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
@@ -550,13 +751,11 @@ public static class InstallerCore
             var output = proc.StandardOutput.ReadToEnd().Trim();
             proc.WaitForExit(10_000);
             if (!string.IsNullOrWhiteSpace(output))
-            {
-                log?.Invoke($"[sc.exe] {output.Replace(Environment.NewLine, " ")}");
-            }
+                log?.Invoke($"[{exeName}] {output.Replace(Environment.NewLine, " ")}");
         }
         catch (Exception ex)
         {
-            log?.Invoke($"[sc.exe] Erreur : {ex.Message}");
+            log?.Invoke($"[{exeName}] Erreur : {ex.Message}");
         }
     }
 }

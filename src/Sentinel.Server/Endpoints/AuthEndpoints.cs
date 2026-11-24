@@ -33,7 +33,11 @@ internal static class AuthEndpoints
             if (result.Success)
                 return Results.Ok(result.Value);
 
-            return EndpointHelpers.Error(StatusCodes.Status401Unauthorized, result.ErrorCode ?? "UNAUTHORIZED", result.ErrorMessage ?? "Authentification échouée.");
+            return result.FailureKind switch
+            {
+                AuthFailureKind.LockedOut => EndpointHelpers.Error(StatusCodes.Status429TooManyRequests, result.ErrorCode ?? "ACCOUNT_LOCKED", result.ErrorMessage ?? "Compte temporairement verrouillé."),
+                _ => EndpointHelpers.Error(StatusCodes.Status401Unauthorized, result.ErrorCode ?? "UNAUTHORIZED", result.ErrorMessage ?? "Authentification échouée.")
+            };
         });
 
         app.MapPost(ApiRoutes.AuthLogout, async (HttpContext ctx, AuthService auth, CancellationToken ct) =>

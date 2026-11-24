@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Sentinel.Core;
+using Sentinel.Detection.Sigma;
 using Sentinel.Shared.Models;
 using Sentinel.Simulation.Ai;
 using Sentinel.Simulation.Scenarios;
@@ -7,18 +8,42 @@ using Sentinel.Simulation.Scenarios;
 namespace Sentinel.Simulation.Benchmark;
 
 /// <summary>
-/// Exécute le protocole expérimental A vs B vs C (doc §14.3) sur les 8 scénarios d'attaque
-/// et le corpus de trafic bénin (220+ événements) afin de mesurer scientifiquement
-/// le Rappel, la Précision, le FPR, le nombre d'événements avant alerte et le gain Time-To-Detect.
+/// Exécute le protocole expérimental A vs B vs C (doc §14.3, v2) sur les 11 scénarios d'attaque
+/// et le corpus de trafic bénin sur 24 heures (480+ événements) avec moteur Sigma natif actif.
 /// </summary>
 public sealed class BenchmarkRunner
 {
     public static readonly IReadOnlyList<EvaluationConfigSpec> Configurations =
     [
-        new("A", "A - Règles seules", EnableLlm: false, EnableCorrelation: false, EarlyEscalation: false),
-        new("B", "B - Règles + IA", EnableLlm: true, EnableCorrelation: false, EarlyEscalation: false),
-        new("C", "C - Règles + IA + Corrélation", EnableLlm: true, EnableCorrelation: true, EarlyEscalation: true)
+        new("A", "A - Règles + Sigma seules", EnableLlm: false, EnableCorrelation: false, EarlyEscalation: false),
+        new("B", "B - Règles + Sigma + IA", EnableLlm: true, EnableCorrelation: false, EarlyEscalation: false),
+        new("C", "C - SENTINEL v2 Complet", EnableLlm: true, EnableCorrelation: true, EarlyEscalation: true)
     ];
+
+    private static ISigmaEngine? TryLoadSigmaEngine()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (var i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "rules", "sigma");
+            if (Directory.Exists(candidate))
+            {
+                var engine = new SigmaEngine();
+                engine.LoadFromDirectory(candidate);
+                return engine;
+            }
+        }
+
+        var cwdCandidate = Path.Combine(Directory.GetCurrentDirectory(), "rules", "sigma");
+        if (Directory.Exists(cwdCandidate))
+        {
+            var engine = new SigmaEngine();
+            engine.LoadFromDirectory(cwdCandidate);
+            return engine;
+        }
+
+        return null;
+    }
 
     public async Task<EvaluationReport> RunAsync(
         CliOptions options,
@@ -30,6 +55,7 @@ public sealed class BenchmarkRunner
 
         var benignEvents = ScenarioCatalog.BuildBenignCorpus(hostId, userId);
         var scenarios = ScenarioCatalog.BuildAttackScenarios(hostId, userId);
+        var sigmaEngine = TryLoadSigmaEngine();
 
         // Préchauffage JIT hors mesure pour que les latences reflètent le régime établi du pipeline
         await WarmUpJitAsync(options, resolvedLlm, ct).ConfigureAwait(false);
@@ -41,10 +67,10 @@ public sealed class BenchmarkRunner
         {
             ct.ThrowIfCancellationRequested();
 
-            // 1. Évaluation du corpus bénin (220+ événements) pour mesurer le FPR et établir la baseline comportementale
-            var benignSettings = BuildSettings(cfg, options);
+            // 1. Évaluation du corpus bénin sur 24 heures (480+ événements) pour mesurer le FPR et établir la baseline comportementale
+            var benignSettings = BuildSettings(cfg, options, resolvedLlm.UsingRealOllama);
             var benignLlm = resolvedLlm.Factory(benignSettings.Llm);
-            var benignPipeline = ThreatPipelineFactory.Create(benignSettings, benignLlm);
+            var benignPipeline = ThreatPipelineFactory.Create(benignSettings, benignLlm, sigma: sigmaEngine);
 
             var falsePositives = 0;
             var totalLatencyMs = 0.0;
@@ -76,9 +102,9 @@ public sealed class BenchmarkRunner
             {
                 ct.ThrowIfCancellationRequested();
 
-                var runSettings = BuildSettings(cfg, options);
+                var runSettings = BuildSettings(cfg, options, resolvedLlm.UsingRealOllama);
                 var runLlm = resolvedLlm.Factory(runSettings.Llm);
-                var pipeline = ThreatPipelineFactory.Create(runSettings, runLlm);
+                var pipeline = ThreatPipelineFactory.Create(runSettings, runLlm, sigma: sigmaEngine);
                 pipeline.ImportBaseline(learnedBaselineJson);
 
                 var detected = false;
@@ -252,7 +278,7 @@ public sealed class BenchmarkRunner
     {
         // Évite tout appel réseau Ollama inutile pendant le préchauffage JIT
         var warmupCfg = Configurations[^1];
-        var settings = BuildSettings(warmupCfg, options);
+        var settings = BuildSettings(warmupCfg, options, usingRealOllama: false);
         settings.Llm.Enabled = !resolvedLlm.UsingRealOllama;
         var llm = new DeterministicSimulatedLlmAssessor();
         var pipe = ThreatPipelineFactory.Create(settings, llm);
@@ -273,7 +299,7 @@ public sealed class BenchmarkRunner
     private static bool IsAlertTriggered(PipelineResult result) =>
         result.Decision is { } d && (d.AlertAdmin || d.Level >= ThreatLevel.High);
 
-    private static SentinelSettings BuildSettings(EvaluationConfigSpec cfg, CliOptions options) => new()
+    private static SentinelSettings BuildSettings(EvaluationConfigSpec cfg, CliOptions options, bool usingRealOllama = false) => new()
     {
         Mode = OperatingMode.Active,
         Llm = new LlmSettings
@@ -281,7 +307,7 @@ public sealed class BenchmarkRunner
             Enabled = cfg.EnableLlm,
             Endpoint = options.OllamaUrl,
             Model = options.OllamaModel,
-            TimeoutSeconds = 10,
+            TimeoutSeconds = usingRealOllama ? 30 : 10,
             AmbiguityLow = 25,
             AmbiguityHigh = 80,
             MinConfidence = 0.5,

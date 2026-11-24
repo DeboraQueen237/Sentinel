@@ -29,13 +29,24 @@ public sealed class SentinelSettings
     public bool EnableTypingRhythm { get; set; } = true;
     public bool EnableBrowserMonitoring { get; set; } = true;
     public bool EnableNetworkMonitoring { get; set; } = true;
+    public bool EnableDefenderCollector { get; set; } = true;
+    public bool EnableSysmonCollector { get; set; } = true;
+
+    public CanarySettings Canaries { get; set; } = new();
+    public ScriptVisibilitySettings ScriptVisibility { get; set; } = new();
+    public ThreatIntelSettings ThreatIntel { get; set; } = new();
+    public StaticScanSettings StaticScan { get; set; } = new();
+    public RulesSettings Rules { get; set; } = new();
+    public MlSettings MachineLearning { get; set; } = new();
+    /// <summary>Langue préférée de la console ("fr" ou "en").</summary>
+    public string Language { get; set; } = "fr";
 }
 
 public sealed class LlmSettings
 {
     public bool Enabled { get; set; } = true;
     public string Endpoint { get; set; } = "http://localhost:11434";
-    public string Model { get; set; } = "qwen2.5:7b";
+    public string Model { get; set; } = "qwen2.5-coder:3b";
     public string EmbeddingModel { get; set; } = "nomic-embed-text";
     public int TimeoutSeconds { get; set; } = 10;
     /// <summary>Le LLM n'est appelé que si le score des règles est dans cette bande « ambiguë » (doc §7.1).</summary>
@@ -45,6 +56,65 @@ public sealed class LlmSettings
     public double MinConfidence { get; set; } = 0.5;
     /// <summary>Nombre max d'appels LLM simultanés.</summary>
     public int MaxConcurrency { get; set; } = 1;
+}
+
+public sealed class CanarySettings
+{
+    public bool Enabled { get; set; } = true;
+    public int FilesPerFolder { get; set; } = 2;
+    public List<string> Folders { get; set; } = new() { "%USERPROFILE%\\Documents", "%USERPROFILE%\\Desktop", "%USERPROFILE%\\Downloads" };
+    public bool AutoIsolateOnTrigger { get; set; } = true;
+}
+
+public sealed class ScriptVisibilitySettings
+{
+    public bool Enabled { get; set; } = true;
+    public bool EnablePowerShell4104 { get; set; } = true;
+    public bool EnableEtwAmsi { get; set; } = true;
+    /// <summary>Stocke un extrait nettoyé et tronqué (max 300 car.) uniquement si explicitement activé.</summary>
+    public bool StoreSanitizedExcerpt { get; set; } = false;
+    public int MaxExcerptLength { get; set; } = 300;
+}
+
+public sealed class ThreatIntelSettings
+{
+    public bool Enabled { get; set; } = true;
+    public bool EnableAbuseChFeeds { get; set; } = true;
+    /// <summary>Flux communautaires optionnels (désactivés par défaut pour respect strict des licences).</summary>
+    public bool EnableOpenPhishCommunity { get; set; } = false;
+    public bool EnablePhishTank { get; set; } = false;
+    /// <summary>Interrogation VirusTotal uniquement à la demande avec clé fournie par l'utilisateur.</summary>
+    public bool EnableVirusTotalOnDemand { get; set; } = false;
+    public int RefreshIntervalHours { get; set; } = 6;
+    public int IndicatorTtlDays { get; set; } = 30;
+}
+
+public sealed class StaticScanSettings
+{
+    public bool Enabled { get; set; } = true;
+    public bool ScanOnFileEvent { get; set; } = true;
+    public bool ScanOnProcessStart { get; set; } = true;
+    public long MaxFileSizeBytes { get; set; } = 25 * 1024 * 1024;
+    public int TimeoutMs { get; set; } = 4000;
+    public int MaxConcurrency { get; set; } = 2;
+    public int ScheduledScanIntervalHours { get; set; } = 24;
+}
+
+public sealed class RulesSettings
+{
+    public bool EnableSigma { get; set; } = true;
+    public bool EnableYara { get; set; } = true;
+    public bool HotReload { get; set; } = true;
+    public List<string> DisabledRuleIds { get; set; } = new();
+    public List<string> ExcludedRuleTargets { get; set; } = new();
+}
+
+public sealed class MlSettings
+{
+    public bool Enabled { get; set; } = true;
+    /// <summary>Contribution maximale du classifieur ML au score (jamais seul décisif).</summary>
+    public int MaxScoreContribution { get; set; } = 35;
+    public double SuspiciousProbabilityThreshold { get; set; } = 0.65;
 }
 
 public sealed class CorrelationSettings

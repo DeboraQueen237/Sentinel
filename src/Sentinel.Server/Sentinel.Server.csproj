@@ -7,6 +7,10 @@
   <ItemGroup>
     <ProjectReference Include="..\Sentinel.Shared\Sentinel.Shared.csproj" />
     <ProjectReference Include="..\Sentinel.AI\Sentinel.AI.csproj" />
+    <ProjectReference Include="..\Sentinel.Detection.Sigma\Sentinel.Detection.Sigma.csproj" />
+    <ProjectReference Include="..\Sentinel.Detection.Static\Sentinel.Detection.Static.csproj" />
+    <ProjectReference Include="..\Sentinel.ThreatIntel\Sentinel.ThreatIntel.csproj" />
+    <ProjectReference Include="..\Sentinel.ML\Sentinel.ML.csproj" />
     <ProjectReference Include="..\Sentinel.Core\Sentinel.Core.csproj" />
     <ProjectReference Include="..\Sentinel.Storage\Sentinel.Storage.csproj" />
   </ItemGroup>
