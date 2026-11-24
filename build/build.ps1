@@ -179,7 +179,7 @@ if (-not $SkipMsi -and (Test-Path $msiProj)) {
         -p:ProductVersion=$Version `
         -p:PayloadDir=$payloadDir `
         -p:RulesDir="$(Join-Path $repoRoot 'rules')" `
-        -p:OutputPath="$msiOutDir\" `
+        -o $msiOutDir `
         -nr:false -m:1 --nologo -v minimal
     if ($LASTEXITCODE -ne 0) { throw "Echec generation MSI WiX v5 (code $LASTEXITCODE)." }
 

@@ -41,7 +41,8 @@
              Level="1">
       <ComponentGroupRef Id="SentinelServicesComponents" />
       <ComponentGroupRef Id="SentinelRuntimePayload" />
-      <ComponentGroupRef Id="SentinelDefaultRules" />
+      <ComponentGroupRef Id="SentinelSigmaRules" />
+      <ComponentGroupRef Id="SentinelYaraRules" />
       <ComponentGroupRef Id="SentinelIntegrationComponents" />
     </Feature>
 
@@ -54,112 +55,115 @@
         <File Id="SentinelServerExe" Source="$(var.PayloadDir)\Sentinel.Server.exe" KeyPath="yes" />
         <ServiceInstall Id="InstallSentinelServer"
                         Name="SentinelServer"
-                        DisplayName="SENTINEL — Serveur d'analyse et corrélation"
-                        Description="Service central SENTINEL : gRPC mTLS (:5181), moteur de corrélation Markov, REST/SignalR (:5180)."
+                        DisplayName="SENTINEL - Serveur d'analyse et correlation"
+                        Description="Service central SENTINEL : gRPC mTLS (:5181), moteur de correlation Markov, REST/SignalR (:5180)."
                         Type="ownProcess"
                         Start="auto"
                         ErrorControl="normal"
-                        Vital="yes" />
+                        Vital="yes">
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="5"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
         <ServiceControl Id="ControlSentinelServer"
                         Name="SentinelServer"
                         Start="install"
                         Stop="both"
                         Remove="uninstall"
                         Wait="yes" />
-        <util:ServiceConfig ServiceName="SentinelServer"
-                            FirstFailureActionType="restart"
-                            SecondFailureActionType="restart"
-                            ThirdFailureActionType="restart"
-                            RestartServiceDelayInSeconds="5"
-                            ResetPeriodInDays="1" />
       </Component>
 
       <Component Id="SentinelAdminServiceComponent" Guid="1A2B3C4D-1002-4E5F-8A9B-0C1D2E3F4A02">
         <File Id="SentinelAdminExe" Source="$(var.PayloadDir)\Sentinel.Admin.exe" KeyPath="yes" />
         <ServiceInstall Id="InstallSentinelAdmin"
                         Name="SentinelAdmin"
-                        DisplayName="SENTINEL — Console d'administration Blazor"
+                        DisplayName="SENTINEL - Console d'administration Blazor"
                         Description="Interface Web locale SOC de SENTINEL sur http://127.0.0.1:5200."
                         Type="ownProcess"
                         Start="auto"
                         ErrorControl="normal"
-                        Vital="yes" />
+                        Vital="yes">
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="5"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
         <ServiceControl Id="ControlSentinelAdmin"
                         Name="SentinelAdmin"
                         Start="install"
                         Stop="both"
                         Remove="uninstall"
                         Wait="yes" />
-        <util:ServiceConfig ServiceName="SentinelAdmin"
-                            FirstFailureActionType="restart"
-                            SecondFailureActionType="restart"
-                            ThirdFailureActionType="restart"
-                            RestartServiceDelayInSeconds="5"
-                            ResetPeriodInDays="1" />
       </Component>
 
       <Component Id="SentinelAgentServiceComponent" Guid="1A2B3C4D-1003-4E5F-8A9B-0C1D2E3F4A03">
         <File Id="SentinelAgentExe" Source="$(var.PayloadDir)\Sentinel.Agent.exe" KeyPath="yes" />
         <ServiceInstall Id="InstallSentinelAgent"
                         Name="SentinelAgent"
-                        DisplayName="SENTINEL — Agent de détection et réponse"
-                        Description="Collecteurs locaux (ETW, Defender, Sysmon optionnel, Canaris, PowerShell 4104) et exécuteur d'actions réversibles."
+                        DisplayName="SENTINEL - Agent de detection et reponse"
+                        Description="Collecteurs locaux (ETW, Defender, Sysmon optionnel, Canaris, PowerShell 4104) et executeur d'actions reversibles."
                         Type="ownProcess"
                         Start="auto"
                         ErrorControl="normal"
-                        Vital="yes" />
+                        Vital="yes">
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="5"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
         <ServiceControl Id="ControlSentinelAgent"
                         Name="SentinelAgent"
                         Start="install"
                         Stop="both"
                         Remove="uninstall"
                         Wait="yes" />
-        <util:ServiceConfig ServiceName="SentinelAgent"
-                            FirstFailureActionType="restart"
-                            SecondFailureActionType="restart"
-                            ThirdFailureActionType="restart"
-                            RestartServiceDelayInSeconds="5"
-                            ResetPeriodInDays="1" />
       </Component>
 
       <Component Id="SentinelWatchdogServiceComponent" Guid="1A2B3C4D-1004-4E5F-8A9B-0C1D2E3F4A04">
         <File Id="SentinelWatchdogExe" Source="$(var.PayloadDir)\Sentinel.Watchdog.exe" KeyPath="yes" />
         <ServiceInstall Id="InstallSentinelWatchdog"
                         Name="SentinelWatchdog"
-                        DisplayName="SENTINEL — Watchdog d'auto-protection"
-                        Description="Surveille la disponibilité et l'intégrité SHA-256 des services SENTINEL."
+                        DisplayName="SENTINEL - Watchdog d'auto-protection"
+                        Description="Surveille la disponibilite et l'integrite SHA-256 des services SENTINEL."
                         Type="ownProcess"
                         Start="auto"
                         ErrorControl="normal"
-                        Vital="yes" />
+                        Vital="yes">
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="5"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
         <ServiceControl Id="ControlSentinelWatchdog"
                         Name="SentinelWatchdog"
                         Start="install"
                         Stop="both"
                         Remove="uninstall"
                         Wait="yes" />
-        <util:ServiceConfig ServiceName="SentinelWatchdog"
-                            FirstFailureActionType="restart"
-                            SecondFailureActionType="restart"
-                            ThirdFailureActionType="restart"
-                            RestartServiceDelayInSeconds="5"
-                            ResetPeriodInDays="1" />
       </Component>
 
     </ComponentGroup>
 
     <ComponentGroup Id="SentinelRuntimePayload" Directory="INSTALLFOLDER">
       <Files Include="$(var.PayloadDir)\**">
-        <Exclude Files="$(var.PayloadDir)\Sentinel.Server.exe" />
-        <Exclude Files="$(var.PayloadDir)\Sentinel.Admin.exe" />
-        <Exclude Files="$(var.PayloadDir)\Sentinel.Agent.exe" />
-        <Exclude Files="$(var.PayloadDir)\Sentinel.Watchdog.exe" />
+        <Exclude Files="**\Sentinel.Server.exe" />
+        <Exclude Files="**\Sentinel.Admin.exe" />
+        <Exclude Files="**\Sentinel.Agent.exe" />
+        <Exclude Files="**\Sentinel.Watchdog.exe" />
       </Files>
     </ComponentGroup>
 
-    <ComponentGroup Id="SentinelDefaultRules">
-      <Files Directory="SentinelSigmaRulesDir" Include="$(var.RulesDir)\sigma\**" />
-      <Files Directory="SentinelYaraRulesDir" Include="$(var.RulesDir)\yara\**" />
+    <ComponentGroup Id="SentinelSigmaRules" Directory="SentinelSigmaRulesDir">
+      <Files Include="$(var.RulesDir)\sigma\**" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="SentinelYaraRules" Directory="SentinelYaraRulesDir">
+      <Files Include="$(var.RulesDir)\yara\**" />
     </ComponentGroup>
 
     <ComponentGroup Id="SentinelIntegrationComponents">

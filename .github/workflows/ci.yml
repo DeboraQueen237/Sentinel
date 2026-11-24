@@ -12,10 +12,9 @@ permissions:
   contents: read
 
 env:
-  DOTNET_NOLOGO: true
-  DOTNET_CLI_TELEMETRY_OPTOUT: true
-  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
-  SENTINEL_DATA_DIR: ${{ runner.temp }}\sentinel-ci
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
 
 jobs:
   build-and-test:
@@ -41,6 +40,8 @@ jobs:
         run: dotnet build Sentinel.slnx --configuration Release --no-restore
 
       - name: Exécution des tests unitaires et d'intégration
+        env:
+          SENTINEL_DATA_DIR: ${{ runner.temp }}\sentinel-ci
         run: dotnet test Sentinel.slnx --configuration Release --no-build --verbosity normal --logger "trx;LogFileName=sentinel-tests.trx" --results-directory TestResults
 
       - name: Publication des résultats de tests
@@ -52,10 +53,12 @@ jobs:
           if-no-files-found: ignore
 
   package-release:
-    name: Package Windows x64 (WiX v5 MSI + Portable ZIP)
+    name: Package & GitHub Release Windows x64 (WiX v5 MSI + Portable ZIP)
     runs-on: windows-latest
     needs: build-and-test
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
 
     steps:
       - name: Récupération du code source
@@ -73,7 +76,7 @@ jobs:
           $ver = if ($tag -match '^v(\d+\.\d+\.\d+)$') { $Matches[1] } else { "2.0.0" }
           .\build\build.ps1 -Version $ver -Restore -SkipTests
 
-      - name: Publication des artefacts de distribution (MSI + Portable ZIP + SHA256SUMS)
+      - name: Publication des artefacts de distribution (Actions Artifacts)
         uses: actions/upload-artifact@v4
         with:
           name: sentinel-windows-x64-dist
@@ -82,3 +85,46 @@ jobs:
             dist/SentinelPortable-*.zip
             dist/SHA256SUMS.txt
           if-no-files-found: error
+
+      - name: Création / mise à jour de la GitHub Release officielle
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $files = @(Get-ChildItem dist -File | Where-Object { $_.Name -match '^(SentinelSetup-.*\.msi|SentinelPortable-.*\.zip|SHA256SUMS\.txt)$' } | ForEach-Object { $_.FullName })
+          if ($files.Count -eq 0) { throw "Aucun artefact de release trouve dans dist/." }
+
+          $prevEap = $ErrorActionPreference
+          $ErrorActionPreference = "Continue"
+          & gh release view $tag *>$null
+          $exists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = $prevEap
+
+          if ($exists) {
+            Write-Host "Mise a jour des fichiers attaches a la Release $tag..."
+            & gh release upload $tag @files --clobber
+          } else {
+            Write-Host "Creation de la GitHub Release $tag..."
+            $repo = "${{ github.repository }}"
+            $notes = @(
+              "## SENTINEL $tag — Windows x64",
+              "",
+              "### Livrables téléchargeables",
+              '- **SentinelSetup-*.msi** : Installateur Windows x64 (WiX v5) — services Windows, règles Sigma & YARA par défaut, démarrage auto Sentinel.Tray, raccourci Dashboard (`http://127.0.0.1:5200`), mise à niveau en place et désinstallation propre.',
+              '- **SentinelPortable-*.zip** : Archive portable x64 complète incluant l''assistant graphique `Sentinel.Installer.exe`, les 6 composants runtime, `extension/` (Chrome/Edge MV3) et `rules/`.',
+              '- **SHA256SUMS.txt** : Empreintes SHA-256 de vérification d''intégrité.',
+              "",
+              "### Vérification d'intégrité (PowerShell)",
+              '```powershell',
+              'Get-FileHash .\SentinelSetup-*.msi -Algorithm SHA256',
+              '```',
+              "",
+              "Voir [CHANGELOG.md](https://github.com/$repo/blob/$tag/CHANGELOG.md) et [docs/v2-final-report.md](https://github.com/$repo/blob/$tag/docs/v2-final-report.md)."
+            ) -join "`n"
+            $notesFile = Join-Path $env:RUNNER_TEMP "release-notes.md"
+            $notes | Set-Content -Path $notesFile -Encoding UTF8
+            & gh release create $tag @files --title "SENTINEL $tag" --notes-file $notesFile
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Echec de publication de la GitHub Release $tag." }
