@@ -5,8 +5,9 @@
     <ProductVersion Condition="'$(ProductVersion)' == ''">2.0.0</ProductVersion>
     <OutputName>SentinelSetup-$(ProductVersion)</OutputName>
     <PayloadDir Condition="'$(PayloadDir)' == ''">..\..\dist\staging\payload</PayloadDir>
+    <ServiceExeDir Condition="'$(ServiceExeDir)' == ''">$(PayloadDir)</ServiceExeDir>
     <RulesDir Condition="'$(RulesDir)' == ''">..\..\rules</RulesDir>
-    <DefineConstants>ProductVersion=$(ProductVersion);PayloadDir=$(PayloadDir);RulesDir=$(RulesDir)</DefineConstants>
+    <DefineConstants>ProductVersion=$(ProductVersion);PayloadDir=$(PayloadDir);ServiceExeDir=$(ServiceExeDir);RulesDir=$(RulesDir)</DefineConstants>
     <Cultures>en-US</Cultures>
   </PropertyGroup>
 

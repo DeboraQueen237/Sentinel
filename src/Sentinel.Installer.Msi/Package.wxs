@@ -52,7 +52,7 @@
     <ComponentGroup Id="SentinelServicesComponents" Directory="INSTALLFOLDER">
 
       <Component Id="SentinelServerServiceComponent" Guid="1A2B3C4D-1001-4E5F-8A9B-0C1D2E3F4A01">
-        <File Id="SentinelServerExe" Source="$(var.PayloadDir)\Sentinel.Server.exe" KeyPath="yes" />
+        <File Id="SentinelServerExe" Source="$(var.ServiceExeDir)\Sentinel.Server.exe" KeyPath="yes" />
         <ServiceInstall Id="InstallSentinelServer"
                         Name="SentinelServer"
                         DisplayName="SENTINEL - Serveur d'analyse et correlation"
@@ -76,7 +76,7 @@
       </Component>
 
       <Component Id="SentinelAdminServiceComponent" Guid="1A2B3C4D-1002-4E5F-8A9B-0C1D2E3F4A02">
-        <File Id="SentinelAdminExe" Source="$(var.PayloadDir)\Sentinel.Admin.exe" KeyPath="yes" />
+        <File Id="SentinelAdminExe" Source="$(var.ServiceExeDir)\Sentinel.Admin.exe" KeyPath="yes" />
         <ServiceInstall Id="InstallSentinelAdmin"
                         Name="SentinelAdmin"
                         DisplayName="SENTINEL - Console d'administration Blazor"
@@ -100,7 +100,7 @@
       </Component>
 
       <Component Id="SentinelAgentServiceComponent" Guid="1A2B3C4D-1003-4E5F-8A9B-0C1D2E3F4A03">
-        <File Id="SentinelAgentExe" Source="$(var.PayloadDir)\Sentinel.Agent.exe" KeyPath="yes" />
+        <File Id="SentinelAgentExe" Source="$(var.ServiceExeDir)\Sentinel.Agent.exe" KeyPath="yes" />
         <ServiceInstall Id="InstallSentinelAgent"
                         Name="SentinelAgent"
                         DisplayName="SENTINEL - Agent de detection et reponse"
@@ -124,7 +124,7 @@
       </Component>
 
       <Component Id="SentinelWatchdogServiceComponent" Guid="1A2B3C4D-1004-4E5F-8A9B-0C1D2E3F4A04">
-        <File Id="SentinelWatchdogExe" Source="$(var.PayloadDir)\Sentinel.Watchdog.exe" KeyPath="yes" />
+        <File Id="SentinelWatchdogExe" Source="$(var.ServiceExeDir)\Sentinel.Watchdog.exe" KeyPath="yes" />
         <ServiceInstall Id="InstallSentinelWatchdog"
                         Name="SentinelWatchdog"
                         DisplayName="SENTINEL - Watchdog d'auto-protection"
@@ -150,12 +150,7 @@
     </ComponentGroup>
 
     <ComponentGroup Id="SentinelRuntimePayload" Directory="INSTALLFOLDER">
-      <Files Include="$(var.PayloadDir)\**">
-        <Exclude Files="**\Sentinel.Server.exe" />
-        <Exclude Files="**\Sentinel.Admin.exe" />
-        <Exclude Files="**\Sentinel.Agent.exe" />
-        <Exclude Files="**\Sentinel.Watchdog.exe" />
-      </Files>
+      <Files Include="$(var.PayloadDir)\**" />
     </ComponentGroup>
 
     <ComponentGroup Id="SentinelSigmaRules" Directory="SentinelSigmaRulesDir">

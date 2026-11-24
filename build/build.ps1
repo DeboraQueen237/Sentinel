@@ -172,12 +172,20 @@ $artifacts = [System.Collections.Generic.List[string]]::new()
 if (-not $SkipMsi -and (Test-Path $msiProj)) {
     Write-Host "  [5/6] Construction de l'installateur Windows MSI (WiX v5)..." -ForegroundColor Yellow
     $msiOutDir = Join-Path $stagingRoot "msi"
+    $msiPayloadDir = Join-Path $stagingRoot "msi-payload"
     New-Item -ItemType Directory -Path $msiOutDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $msiPayloadDir -Force | Out-Null
+    Copy-Item -Path (Join-Path $payloadDir "*") -Destination $msiPayloadDir -Recurse -Force
+    foreach ($svcExe in @("Sentinel.Server.exe", "Sentinel.Admin.exe", "Sentinel.Agent.exe", "Sentinel.Watchdog.exe")) {
+        $dup = Join-Path $msiPayloadDir $svcExe
+        if (Test-Path $dup) { Remove-Item $dup -Force }
+    }
 
     & dotnet build $msiProj `
         -c Release `
         -p:ProductVersion=$Version `
-        -p:PayloadDir=$payloadDir `
+        -p:PayloadDir=$msiPayloadDir `
+        -p:ServiceExeDir=$payloadDir `
         -p:RulesDir="$(Join-Path $repoRoot 'rules')" `
         -o $msiOutDir `
         -nr:false -m:1 --nologo -v minimal
