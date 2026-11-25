@@ -4,7 +4,11 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using OtpNet;
+using Sentinel.Server.Services;
 using Sentinel.Shared.Api;
 using Sentinel.Shared.Json;
 
@@ -42,6 +46,14 @@ public sealed class SentinelServerFactory : WebApplicationFactory<Program>
                 ["Sentinel:ConnectionString"] = ConnectionString,
                 ["Sentinel:SessionTtlMinutes"] = "30"
             });
+        });
+        builder.ConfigureServices(services =>
+        {
+            services.RemoveAll<NotificationSecretStore>();
+            services.AddSingleton(sp => new NotificationSecretStore(
+                sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<ILogger<NotificationSecretStore>>(),
+                Path.Combine(TempDirectory, "notifications-secrets.dpapi")));
         });
     }
 

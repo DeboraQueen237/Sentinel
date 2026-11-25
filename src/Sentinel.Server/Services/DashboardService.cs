@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Sentinel.AI;
 using Sentinel.Core.Abstractions;
 using Sentinel.Shared.Api;
 using Sentinel.Shared.Models;
@@ -17,15 +18,18 @@ public sealed class DashboardService
     private readonly IDbContextFactory<SentinelDbContext> _dbFactory;
     private readonly IThreatPipeline _pipeline;
     private readonly AgentCommandHub _commandHub;
+    private readonly ILlmAssessor? _llm;
 
     public DashboardService(
         IDbContextFactory<SentinelDbContext> dbFactory,
         IThreatPipeline pipeline,
-        AgentCommandHub commandHub)
+        AgentCommandHub commandHub,
+        ILlmAssessor? llm = null)
     {
         _dbFactory = dbFactory;
         _pipeline = pipeline;
         _commandHub = commandHub;
+        _llm = llm;
     }
 
     public async Task<DashboardSummaryDto> GetSummaryAsync(CancellationToken ct = default)
@@ -149,7 +153,7 @@ public sealed class DashboardService
             HostsTotal: hostsTotal,
             Mode: settings.Mode,
             LlmAvailable: stats.LlmAvailable,
-            LlmModel: settings.Llm.Model,
+            LlmModel: !string.IsNullOrWhiteSpace(_llm?.ActiveModel) ? _llm.ActiveModel : settings.Llm.Model,
             LevelDistribution24h: levelDist,
             ThreatTypes24h: typeDist,
             Categories24h: catDist,

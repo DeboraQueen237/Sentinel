@@ -284,24 +284,100 @@ else if (_settings is not null)
             </div>
         </section>
 
-        <!-- 5. IA Locale (Ollama) -->
+        <!-- 5. IA Locale (Ollama — Sélection intelligente Qwen & Optimisation) -->
         <section class="card">
             <div class="card-header">
                 <div>
-                    <h2 class="card-title">IA locale (Ollama — 100 % hors ligne)</h2>
-                    <p class="card-subtitle">Appelé uniquement sur les événements dans la bande d'ambiguïté pour préserver les ressources (§7.1)</p>
+                    <h2 class="card-title">IA locale (Ollama — Auto-sélection Qwen &amp; Optimisation)</h2>
+                    <p class="card-subtitle">Détecte automatiquement le meilleur modèle Qwen installé localement selon votre RAM et optimise la latence CPU/GPU (§7.1)</p>
                 </div>
+                <button type="button" class="btn btn-sm" @onclick="AutoSelectLlmAsync" disabled="@_selectingLlm">
+                    @(_selectingLlm ? "Détection…" : "Re-détecter le meilleur Qwen")
+                </button>
             </div>
 
-            <div class="toggle-row" style="margin-bottom:16px;">
-                <div>
-                    <div style="font-weight:600;">Activer le scoring contextuel par LLM local</div>
-                    <div class="field-hint">En cas de désactivation ou d'indisponibilité d'Ollama, le moteur bascule automatiquement sur les règles déterministes.</div>
+            @if (_llmStatus is not null)
+            {
+                <div class="card" style="background:rgba(15,23,42,0.6);border:1px solid rgba(56,189,248,0.25);padding:12px 14px;margin-bottom:16px;">
+                    <div class="row-wrap" style="justify-content:space-between;gap:12px;">
+                        <div>
+                            <span class="badge @(_llmStatus.Available ? "badge-emerald" : "badge-amber")">
+                                @(_llmStatus.Available ? "Ollama en ligne" : "Ollama hors ligne (repli règles)")
+                            </span>
+                            <strong class="mono" style="margin-left:8px;color:var(--accent-cyan);">@_llmStatus.ActiveModel</strong>
+                            @if (_llmStatus.AutoSelected)
+                            {
+                                <span class="badge" style="margin-left:6px;">Auto-sélectionné</span>
+                            }
+                            @if (_llmStatus.WarmedUp)
+                            {
+                                <span class="badge badge-emerald" style="margin-left:6px;">Préchargé en mémoire</span>
+                            }
+                        </div>
+                        <div class="text-muted mono" style="font-size:12px;">
+                            RAM : @_llmStatus.HostRamGb.ToString("F1") Go · Appels : @_llmStatus.Calls · Cache hits : @_llmStatus.CacheHits · Latence moy. : @_llmStatus.AvgLatencyMs.ToString("F0") ms
+                        </div>
+                    </div>
+                    <div class="text-secondary" style="font-size:12.5px;margin-top:6px;">@_llmStatus.SelectionReason</div>
+                    @if (_llmStatus.InstalledModels.Count > 0)
+                    {
+                        <div class="row-wrap" style="gap:6px;margin-top:8px;">
+                            @foreach (var m in _llmStatus.InstalledModels)
+                            {
+                                var gb = m.SizeBytes > 0 ? $" ({m.SizeBytes / (1024.0 * 1024.0 * 1024.0):F1} Go)" : string.Empty;
+                                <span class="badge @(m.Selected ? "badge-emerald" : (m.IsQwen ? "badge-cyan" : ""))" title="@(m.ParameterSize ?? m.Family)">
+                                    @m.Name@gb@(m.Selected ? " ✓" : "")
+                                </span>
+                            }
+                        </div>
+                    }
                 </div>
-                <label class="switch">
-                    <input type="checkbox" @bind="_settings.Llm.Enabled" @bind:after="MarkDirty" />
-                    <span class="switch-track"></span>
-                </label>
+            }
+
+            <div class="grid-2" style="margin-bottom:16px;">
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Activer le scoring contextuel par LLM local</div>
+                        <div class="field-hint">Bascule instantanément sur les règles déterministes si Ollama est indisponible.</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.Llm.Enabled" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Sélection automatique du meilleur modèle Qwen local</div>
+                        <div class="field-hint">Choisit le Qwen le plus performant déjà présent sur le PC sans dépasser votre RAM (aucun téléchargement silencieux).</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.Llm.AutoSelectBestQwen" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Cache sémantique TTL des réponses LLM</div>
+                        <div class="field-hint">Absorbe les rafales d'événements similaires en &lt; 0,1 ms sans solliciter Ollama.</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.Llm.EnableResponseCache" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Préchauffage du modèle au démarrage</div>
+                        <div class="field-hint">Charge le modèle en mémoire avec keep_alive pour supprimer la latence à froid.</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.Llm.WarmUpOnStartup" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
             </div>
 
             <div class="grid-3">
@@ -310,9 +386,9 @@ else if (_settings is not null)
                     <input class="input mono" @bind="_settings.Llm.Endpoint" @bind:after="MarkDirty" />
                 </div>
                 <div class="field">
-                    <label class="field-label">Modèle de scoring</label>
+                    <label class="field-label">Modèle de secours / manuel</label>
                     <input class="input mono" @bind="_settings.Llm.Model" @bind:after="MarkDirty" />
-                    <span class="field-hint">Recommandé : qwen2.5-coder:3b (local) ou qwen2.5:7b</span>
+                    <span class="field-hint">Ex. qwen2.5-coder:3b, qwen2.5:7b, qwen3:8b</span>
                 </div>
                 <div class="field">
                     <label class="field-label">Modèle d'embeddings</label>
@@ -331,6 +407,22 @@ else if (_settings is not null)
                     <input type="number" class="input mono" min="2" max="60" @bind="_settings.Llm.TimeoutSeconds" @bind:after="MarkDirty" />
                 </div>
                 <div class="field">
+                    <label class="field-label">Fenêtre de contexte (num_ctx)</label>
+                    <input type="number" class="input mono" min="512" max="8192" step="256" @bind="_settings.Llm.ContextWindow" @bind:after="MarkDirty" />
+                    <span class="field-hint">2048 recommandé sur CPU pour une réponse rapide.</span>
+                </div>
+                <div class="field">
+                    <label class="field-label">Tokens max de sortie (num_predict)</label>
+                    <input type="number" class="input mono" min="64" max="512" step="16" @bind="_settings.Llm.MaxOutputTokens" @bind:after="MarkDirty" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Maintien mémoire (keep_alive) / Cache (min)</label>
+                    <div style="display:flex;gap:8px;">
+                        <input class="input mono" placeholder="10m" title="keep_alive" @bind="_settings.Llm.KeepAlive" @bind:after="MarkDirty" />
+                        <input type="number" class="input mono" min="1" max="60" title="TTL cache (min)" @bind="_settings.Llm.CacheTtlMinutes" @bind:after="MarkDirty" />
+                    </div>
+                </div>
+                <div class="field">
                     <label class="field-label">Confiance minimale (0 – 1)</label>
                     <input type="number" class="input mono" step="0.05" min="0" max="1" @bind="_settings.Llm.MinConfidence" @bind:after="MarkDirty" />
                 </div>
@@ -338,6 +430,319 @@ else if (_settings is not null)
                     <label class="field-label">Appels simultanés max</label>
                     <input type="number" class="input mono" min="1" max="8" @bind="_settings.Llm.MaxConcurrency" @bind:after="MarkDirty" />
                 </div>
+            </div>
+        </section>
+
+        <!-- 5b. Notifications externes administrateur par niveau de criticité -->
+        <section class="card">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">Notifications administrateur par criticité (Email, WhatsApp, Webhook / Slack / Teams / Telegram)</h2>
+                    <p class="card-subtitle">Alertes automatiques sur alerte ou cluster corrélé selon le niveau minimal choisi · Strictement opt-in · Métadonnées uniquement · Secrets chiffrés DPAPI</p>
+                </div>
+                <button type="button" class="btn btn-sm" @onclick="RefreshNotifStatusAsync">Actualiser le statut</button>
+            </div>
+
+            <div class="grid-2" style="margin-bottom:16px;">
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Activer les notifications externes administrateur</div>
+                        <div class="field-hint">Interrupteur maître. Désactivé par défaut pour confidentialité maximale.</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.Notifications.Enabled" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Notifier également sur les clusters corrélés</div>
+                        <div class="field-hint">Déclenche une alerte dès qu'une chaîne d'événements corrélés atteint le niveau requis.</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.Notifications.NotifyOnCorrelatedCluster" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="grid-3" style="margin-bottom:18px;">
+                <div class="field">
+                    <label class="field-label">Délai anti-spam / cooldown (minutes)</label>
+                    <input type="number" class="input mono" min="0" max="1440" @bind="_settings.Notifications.CooldownMinutes" @bind:after="MarkDirty" />
+                    <span class="field-hint">Contourné immédiatement en cas d'escalade (ex. Élevé → Critique).</span>
+                </div>
+                <div class="field">
+                    <label class="field-label">URL console locale dans les alertes</label>
+                    <input class="input mono" @bind="_settings.Notifications.DashboardBaseUrl" @bind:after="MarkDirty" />
+                </div>
+                <div class="field">
+                    <label class="field-label">Statistiques de diffusion</label>
+                    <div class="text-secondary mono" style="font-size:12.5px;padding-top:8px;">
+                        @if (_notifStatus is not null)
+                        {
+                            <span>Envoyées : @_notifStatus.TotalSent · Échecs : @_notifStatus.TotalFailed · Cooldown : @_notifStatus.SuppressedByCooldown</span>
+                        }
+                        else
+                        {
+                            <span>Chargement…</span>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- Canaux individuels -->
+            <div class="stack-md">
+                <!-- Email SMTP -->
+                <div class="card" style="background:rgba(15,23,42,0.45);padding:14px;">
+                    <div class="row-wrap" style="justify-content:space-between;margin-bottom:12px;">
+                        <div class="row-wrap" style="gap:10px;">
+                            <strong>Email (SMTP TLS / STARTTLS)</strong>
+                            @if (_notifStatus?.Secrets.HasSmtpPassword == true)
+                            {
+                                <span class="badge badge-emerald">Mot de passe DPAPI enregistré</span>
+                            }
+                        </div>
+                        <div class="row-wrap" style="gap:10px;">
+                            <button type="button" class="btn btn-sm" @onclick='() => TestNotificationAsync("email")' disabled="@_testingChannel">
+                                Tester Email
+                            </button>
+                            <label class="switch">
+                                <input type="checkbox" @bind="_settings.Notifications.Email.Enabled" @bind:after="MarkDirty" />
+                                <span class="switch-track"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="grid-3">
+                        <div class="field">
+                            <label class="field-label">Criticité minimale</label>
+                            <select class="input" @bind="_settings.Notifications.Email.MinLevel" @bind:after="MarkDirty">
+                                <option value="@ThreatLevel.Low">Faible (≥ 30)</option>
+                                <option value="@ThreatLevel.Moderate">Modéré (≥ 55)</option>
+                                <option value="@ThreatLevel.High">Élevé (≥ 75)</option>
+                                <option value="@ThreatLevel.Critical">Critique (≥ 90)</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label">Serveur SMTP</label>
+                            <input class="input mono" placeholder="smtp.gmail.com" @bind="_settings.Notifications.Email.SmtpHost" @bind:after="MarkDirty" />
+                        </div>
+                        <div class="field">
+                            <label class="field-label">Port SMTP &amp; STARTTLS</label>
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <input type="number" class="input mono" min="1" max="65535" @bind="_settings.Notifications.Email.SmtpPort" @bind:after="MarkDirty" />
+                                <label style="display:flex;gap:4px;font-size:12px;white-space:nowrap;">
+                                    <input type="checkbox" @bind="_settings.Notifications.Email.UseStartTls" @bind:after="MarkDirty" /> TLS
+                                </label>
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label">Adresse expéditeur</label>
+                            <input class="input mono" placeholder="sentinel-soc@entreprise.local" @bind="_settings.Notifications.Email.FromAddress" @bind:after="MarkDirty" />
+                        </div>
+                        <div class="field">
+                            <label class="field-label">Identifiant SMTP (login)</label>
+                            <input class="input mono" placeholder="utilisateur@domaine.com" @bind="_settings.Notifications.Email.Username" @bind:after="MarkDirty" />
+                        </div>
+                        <div class="field">
+                            <label class="field-label">Mot de passe SMTP (chiffré DPAPI)</label>
+                            <input type="password" class="input" placeholder="Laisser vide pour conserver l'actuel" @bind="_smtpPasswordInput" />
+                        </div>
+                    </div>
+                    <div style="margin-top:10px;">
+                        <StringListEditor Label="Destinataires Email administrateurs"
+                                          Placeholder="soc-admin@entreprise.com"
+                                          Items="_settings.Notifications.Email.Recipients"
+                                          OnChanged="MarkDirty" />
+                    </div>
+                </div>
+
+                <!-- WhatsApp -->
+                <div class="card" style="background:rgba(15,23,42,0.45);padding:14px;">
+                    <div class="row-wrap" style="justify-content:space-between;margin-bottom:12px;">
+                        <div class="row-wrap" style="gap:10px;">
+                            <strong>WhatsApp (Meta Cloud API ou Twilio)</strong>
+                            @if (_notifStatus?.Secrets.HasWhatsAppToken == true)
+                            {
+                                <span class="badge badge-emerald">Jeton API DPAPI enregistré</span>
+                            }
+                        </div>
+                        <div class="row-wrap" style="gap:10px;">
+                            <button type="button" class="btn btn-sm" @onclick='() => TestNotificationAsync("whatsapp")' disabled="@_testingChannel">
+                                Tester WhatsApp
+                            </button>
+                            <label class="switch">
+                                <input type="checkbox" @bind="_settings.Notifications.WhatsApp.Enabled" @bind:after="MarkDirty" />
+                                <span class="switch-track"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="grid-3">
+                        <div class="field">
+                            <label class="field-label">Criticité minimale</label>
+                            <select class="input" @bind="_settings.Notifications.WhatsApp.MinLevel" @bind:after="MarkDirty">
+                                <option value="@ThreatLevel.Low">Faible (≥ 30)</option>
+                                <option value="@ThreatLevel.Moderate">Modéré (≥ 55)</option>
+                                <option value="@ThreatLevel.High">Élevé (≥ 75)</option>
+                                <option value="@ThreatLevel.Critical">Critique (≥ 90)</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label">Fournisseur officiel</label>
+                            <select class="input" @bind="_settings.Notifications.WhatsApp.Provider" @bind:after="MarkDirty">
+                                <option value="MetaCloud">Meta WhatsApp Cloud API</option>
+                                <option value="Twilio">Twilio WhatsApp API</option>
+                            </select>
+                        </div>
+                        @if (string.Equals(_settings.Notifications.WhatsApp.Provider, "Twilio", StringComparison.OrdinalIgnoreCase))
+                        {
+                            <div class="field">
+                                <label class="field-label">Twilio Account SID</label>
+                                <input class="input mono" placeholder="ACxxxxxxxxxxxxxxxx" @bind="_settings.Notifications.WhatsApp.AccountSid" @bind:after="MarkDirty" />
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Numéro expéditeur Twilio</label>
+                                <input class="input mono" placeholder="whatsapp:+14155238886" @bind="_settings.Notifications.WhatsApp.FromNumber" @bind:after="MarkDirty" />
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="field">
+                                <label class="field-label">Meta Phone Number ID</label>
+                                <input class="input mono" placeholder="123456789012345" @bind="_settings.Notifications.WhatsApp.PhoneNumberId" @bind:after="MarkDirty" />
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Version Graph API</label>
+                                <input class="input mono" placeholder="v21.0" @bind="_settings.Notifications.WhatsApp.ApiVersion" @bind:after="MarkDirty" />
+                            </div>
+                        }
+                        <div class="field">
+                            <label class="field-label">Jeton d'accès / Auth Token (DPAPI)</label>
+                            <input type="password" class="input" placeholder="Laisser vide pour conserver l'actuel" @bind="_whatsAppTokenInput" />
+                        </div>
+                    </div>
+                    <div style="margin-top:10px;">
+                        <StringListEditor Label="Numéros WhatsApp administrateurs (E.164)"
+                                          Placeholder="+2376XXXXXXXX"
+                                          Hint="Format international E.164 avec indicatif pays."
+                                          Items="_settings.Notifications.WhatsApp.Recipients"
+                                          OnChanged="MarkDirty" />
+                    </div>
+                </div>
+
+                <!-- Webhook / Slack / Teams / Discord / Telegram -->
+                <div class="card" style="background:rgba(15,23,42,0.45);padding:14px;">
+                    <div class="row-wrap" style="justify-content:space-between;margin-bottom:12px;">
+                        <div class="row-wrap" style="gap:10px;">
+                            <strong>Webhook / Slack / Microsoft Teams / Discord / Telegram</strong>
+                            @if (_notifStatus?.Secrets.HasWebhookSecret == true)
+                            {
+                                <span class="badge badge-emerald">Secret HMAC / Bot DPAPI enregistré</span>
+                            }
+                        </div>
+                        <div class="row-wrap" style="gap:10px;">
+                            <button type="button" class="btn btn-sm" @onclick='() => TestNotificationAsync("webhook")' disabled="@_testingChannel">
+                                Tester Webhook
+                            </button>
+                            <label class="switch">
+                                <input type="checkbox" @bind="_settings.Notifications.Webhook.Enabled" @bind:after="MarkDirty" />
+                                <span class="switch-track"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="grid-3">
+                        <div class="field">
+                            <label class="field-label">Criticité minimale</label>
+                            <select class="input" @bind="_settings.Notifications.Webhook.MinLevel" @bind:after="MarkDirty">
+                                <option value="@ThreatLevel.Low">Faible (≥ 30)</option>
+                                <option value="@ThreatLevel.Moderate">Modéré (≥ 55)</option>
+                                <option value="@ThreatLevel.High">Élevé (≥ 75)</option>
+                                <option value="@ThreatLevel.Critical">Critique (≥ 90)</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label">Format</label>
+                            <select class="input" @bind="_settings.Notifications.Webhook.Format" @bind:after="MarkDirty">
+                                <option value="GenericJson">JSON générique (+ signature HMAC-SHA256)</option>
+                                <option value="Slack">Slack Incoming Webhook</option>
+                                <option value="Teams">Microsoft Teams (MessageCard)</option>
+                                <option value="Discord">Discord Webhook</option>
+                                <option value="Telegram">Telegram Bot API</option>
+                            </select>
+                        </div>
+                        @if (string.Equals(_settings.Notifications.Webhook.Format, "Telegram", StringComparison.OrdinalIgnoreCase))
+                        {
+                            <div class="field">
+                                <label class="field-label">Telegram Chat ID</label>
+                                <input class="input mono" placeholder="-1001234567890" @bind="_settings.Notifications.Webhook.TelegramChatId" @bind:after="MarkDirty" />
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="field">
+                                <label class="field-label">URL Webhook (HTTPS)</label>
+                                <input class="input mono" placeholder="https://hooks.slack.com/services/..." @bind="_settings.Notifications.Webhook.Url" @bind:after="MarkDirty" />
+                            </div>
+                        }
+                        <div class="field">
+                            <label class="field-label">Clé HMAC-SHA256 / Jeton Bot Telegram (DPAPI)</label>
+                            <input type="password" class="input" placeholder="Laisser vide pour conserver l'actuel" @bind="_webhookSecretInput" />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row-wrap" style="justify-content:space-between;align-items:center;">
+                    <span class="field-hint">
+                        Stockage sécurisé des identifiants : @(_notifStatus?.Secrets.StorageMode ?? "DPAPI Windows"). Aucun mot de passe n'est stocké dans SQLite.
+                    </span>
+                    <button type="button" class="btn btn-amber" @onclick="SaveNotificationSecretsAsync" disabled="@_savingSecrets">
+                        @(_savingSecrets ? "Chiffrement…" : "Enregistrer les secrets (DPAPI)")
+                    </button>
+                </div>
+
+                @if (_notifStatus is { RecentDeliveries.Count: > 0 })
+                {
+                    <div style="margin-top:8px;">
+                        <div style="font-weight:600;margin-bottom:6px;font-size:13px;">Historique récent des notifications</div>
+                        <div class="table-wrap">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Canal</th>
+                                        <th>Déclencheur</th>
+                                        <th>Criticité</th>
+                                        <th>Poste</th>
+                                        <th>Statut</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var d in _notifStatus.RecentDeliveries.Take(10))
+                                    {
+                                        <tr>
+                                            <td class="mono">@UiFormatters.FormatShortDateTime(d.Timestamp)</td>
+                                            <td class="mono">@d.Channel</td>
+                                            <td>@d.TriggerKind</td>
+                                            <td><span class="badge">@d.Level</span></td>
+                                            <td class="mono">@d.HostId</td>
+                                            <td>
+                                                @if (d.Success)
+                                                {
+                                                    <span class="badge badge-emerald">OK (@d.ElapsedMs.ToString("F0") ms)</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge badge-crimson" title="@d.Error">Échec : @(d.Error ?? "Erreur")</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                }
             </div>
         </section>
 
@@ -482,10 +887,19 @@ else if (_settings is not null)
 
 @code {
     private SentinelSettings? _settings;
+    private LlmStatusDto? _llmStatus;
+    private NotificationStatusDto? _notifStatus;
     private bool _loading = true;
     private bool _saving;
     private bool _dirty;
+    private bool _selectingLlm;
+    private bool _testingChannel;
+    private bool _savingSecrets;
     private string? _error;
+
+    private string _smtpPasswordInput = string.Empty;
+    private string _whatsAppTokenInput = string.Empty;
+    private string _webhookSecretInput = string.Empty;
 
     private string _curPwd = string.Empty;
     private string _newPwd = string.Empty;
@@ -505,10 +919,106 @@ else if (_settings is not null)
         try
         {
             _settings = await Api.GetSettingsAsync();
+            _settings.Notifications ??= new NotificationSettings();
             _dirty = false;
+            try { _llmStatus = await Api.GetLlmStatusAsync(); } catch { /* optionnel */ }
+            try { _notifStatus = await Api.GetNotificationStatusAsync(); } catch { /* optionnel */ }
         }
         catch (SentinelApiException ex) { _error = ex.Message; }
         finally { _loading = false; }
+    }
+
+    private async Task AutoSelectLlmAsync()
+    {
+        _selectingLlm = true;
+        try
+        {
+            _llmStatus = await Api.AutoSelectLlmModelAsync();
+            Toasts.Success("Détection Ollama terminée", _llmStatus.SelectionReason);
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Danger("Échec détection Ollama", ex.Message);
+        }
+        finally
+        {
+            _selectingLlm = false;
+        }
+    }
+
+    private async Task RefreshNotifStatusAsync()
+    {
+        try
+        {
+            _notifStatus = await Api.GetNotificationStatusAsync();
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Warning("Statut indisponible", ex.Message);
+        }
+    }
+
+    private async Task SaveNotificationSecretsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_smtpPasswordInput) &&
+            string.IsNullOrWhiteSpace(_whatsAppTokenInput) &&
+            string.IsNullOrWhiteSpace(_webhookSecretInput))
+        {
+            Toasts.Warning("Aucun secret saisi", "Saisissez au moins un mot de passe SMTP, un jeton WhatsApp ou un secret Webhook.");
+            return;
+        }
+
+        _savingSecrets = true;
+        try
+        {
+            await Api.UpdateNotificationSecretsAsync(new NotificationSecretsRequest(
+                SmtpPassword: string.IsNullOrWhiteSpace(_smtpPasswordInput) ? null : _smtpPasswordInput,
+                WhatsAppAccessToken: string.IsNullOrWhiteSpace(_whatsAppTokenInput) ? null : _whatsAppTokenInput,
+                WebhookSecret: string.IsNullOrWhiteSpace(_webhookSecretInput) ? null : _webhookSecretInput));
+
+            _smtpPasswordInput = _whatsAppTokenInput = _webhookSecretInput = string.Empty;
+            await RefreshNotifStatusAsync();
+            Toasts.Success("Secrets chiffrés (DPAPI)", "Les identifiants ont été enregistrés dans le coffre protégé local.");
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Danger("Échec enregistrement des secrets", ex.Message);
+        }
+        finally
+        {
+            _savingSecrets = false;
+        }
+    }
+
+    private async Task TestNotificationAsync(string channel)
+    {
+        if (_dirty && _settings is not null)
+        {
+            await SaveAsync();
+        }
+
+        _testingChannel = true;
+        try
+        {
+            var res = await Api.TestNotificationAsync(channel);
+            await RefreshNotifStatusAsync();
+            if (res.Success)
+            {
+                Toasts.Success($"Test {channel} réussi", $"Notification envoyée en {res.ElapsedMs:F0} ms.");
+            }
+            else
+            {
+                Toasts.Danger($"Test {channel} en échec", res.Error ?? "Vérifiez la configuration et les secrets DPAPI.");
+            }
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Danger($"Erreur test {channel}", ex.Message);
+        }
+        finally
+        {
+            _testingChannel = false;
+        }
     }
 
     private void MarkDirty() => _dirty = true;
@@ -551,6 +1061,8 @@ else if (_settings is not null)
         {
             _settings = await Api.SaveSettingsAsync(_settings);
             _dirty = false;
+            try { _llmStatus = await Api.GetLlmStatusAsync(); } catch { /* ignoré */ }
+            try { _notifStatus = await Api.GetNotificationStatusAsync(); } catch { /* ignoré */ }
             Toasts.Success("Paramètres enregistrés", "Configuration sauvegardée et appliquée au moteur SENTINEL.");
         }
         catch (SentinelApiException ex)

@@ -313,6 +313,22 @@ public sealed class SentinelApiClient
     public Task<IReadOnlyList<AgentHealthDto>> GetAgentsHealthAsync(CancellationToken ct = default) =>
         SendAsync<IReadOnlyList<AgentHealthDto>>(HttpMethod.Get, ApiRoutes.AgentsHealth, null, true, ct);
 
+    public Task<LlmStatusDto> GetLlmStatusAsync(CancellationToken ct = default) =>
+        SendAsync<LlmStatusDto>(HttpMethod.Get, ApiRoutes.LlmStatus, null, true, ct);
+
+    public Task<LlmStatusDto> AutoSelectLlmModelAsync(CancellationToken ct = default) =>
+        SendAsync<LlmStatusDto>(HttpMethod.Post, ApiRoutes.LlmSelectBest, null, true, ct);
+
+    // ------------------------------------------------------------------------- Notifications externes administrateur (v2.1)
+    public Task<NotificationStatusDto> GetNotificationStatusAsync(CancellationToken ct = default) =>
+        SendAsync<NotificationStatusDto>(HttpMethod.Get, ApiRoutes.NotificationStatus, null, true, ct);
+
+    public Task<NotificationDeliveryDto> TestNotificationAsync(string channel, CancellationToken ct = default) =>
+        SendAsync<NotificationDeliveryDto>(HttpMethod.Post, ApiRoutes.NotificationTest, new NotificationTestRequest(channel), true, ct);
+
+    public Task<NotificationSecretsStatusDto> UpdateNotificationSecretsAsync(NotificationSecretsRequest request, CancellationToken ct = default) =>
+        SendAsync<NotificationSecretsStatusDto>(HttpMethod.Put, ApiRoutes.NotificationSecrets, request, true, ct);
+
     // ------------------------------------------------------------------------- Détection v2 (Intel, Règles, Scan, ML, Canaris, Feedback)
     public Task<ThreatIntelStatusDto> GetThreatIntelStatusAsync(CancellationToken ct = default) =>
         SendAsync<ThreatIntelStatusDto>(HttpMethod.Get, ApiRoutes.ThreatIntelStatus, null, true, ct);

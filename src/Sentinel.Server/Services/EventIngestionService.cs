@@ -23,6 +23,7 @@ public sealed class EventIngestionService : IDisposable
     private readonly HashChainWriter _hashChainWriter;
     private readonly AgentCommandHub _commandHub;
     private readonly LiveBroadcaster _broadcaster;
+    private readonly IAlertNotificationDispatcher? _notifications;
     private readonly ILogger<EventIngestionService> _logger;
     private readonly SemaphoreSlim _stateLock = new(1, 1);
 
@@ -32,7 +33,8 @@ public sealed class EventIngestionService : IDisposable
         HashChainWriter hashChainWriter,
         AgentCommandHub commandHub,
         LiveBroadcaster broadcaster,
-        ILogger<EventIngestionService> logger)
+        ILogger<EventIngestionService> logger,
+        IAlertNotificationDispatcher? notifications = null)
     {
         _pipeline = pipeline;
         _dbFactory = dbFactory;
@@ -40,6 +42,7 @@ public sealed class EventIngestionService : IDisposable
         _commandHub = commandHub;
         _broadcaster = broadcaster;
         _logger = logger;
+        _notifications = notifications;
     }
 
     public async Task<PipelineResult> IngestAsync(SecurityEvent evt, CancellationToken ct = default)
@@ -84,6 +87,8 @@ public sealed class EventIngestionService : IDisposable
         // 3. Mise à jour clusters, alertes, tickets d'actions et postes sous verrou séquentiel
         var broadcasts = new PendingBroadcasts();
         var commandsToPush = new List<(string HostId, Shared.Grpc.AgentCommand Command)>();
+        var alertsToNotify = new List<(AlertDto Alert, bool Escalated)>();
+        var clustersToNotify = new Dictionary<Guid, ClusterDto>();
 
         await _stateLock.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -104,13 +109,16 @@ public sealed class EventIngestionService : IDisposable
                 if (res.Cluster is { } cluster)
                 {
                     var clusterEntity = await UpsertClusterAsync(db, cluster, ct).ConfigureAwait(false);
-                    broadcasts.Clusters[clusterEntity.Id] = clusterEntity.ToDto();
+                    var clusterDto = clusterEntity.ToDto();
+                    broadcasts.Clusters[clusterEntity.Id] = clusterDto;
+                    clustersToNotify[clusterEntity.Id] = clusterDto;
                 }
 
                 // 3b. Alertes + Actions
                 AlertEntity? alertEntity = null;
                 var alertCreated = false;
                 var alertUpdated = false;
+                var alertEscalated = false;
 
                 if (res.Decision is { } decision)
                 {
@@ -120,7 +128,7 @@ public sealed class EventIngestionService : IDisposable
 
                     if (shouldAlert)
                     {
-                        (alertEntity, alertCreated) = await UpsertAlertAsync(db, res, decision, ct).ConfigureAwait(false);
+                        (alertEntity, alertCreated, alertEscalated) = await UpsertAlertAsync(db, res, decision, ct).ConfigureAwait(false);
                         alertUpdated = !alertCreated;
                     }
 
@@ -158,9 +166,15 @@ public sealed class EventIngestionService : IDisposable
 
                     var dto = alertEntity.ToDto(pendingCount);
                     if (alertCreated)
+                    {
                         broadcasts.AlertsRaised[alertEntity.Id] = dto;
+                        alertsToNotify.Add((dto, false));
+                    }
                     else if (alertUpdated)
+                    {
                         broadcasts.AlertsUpdated[alertEntity.Id] = dto;
+                        alertsToNotify.Add((dto, alertEscalated));
+                    }
                 }
             }
         }
@@ -179,8 +193,20 @@ public sealed class EventIngestionService : IDisposable
             }
         }
 
-        // 5. Diffusions SignalR temps réel
+        // 5. Diffusions SignalR temps réel + notifications externes non bloquantes selon criticité
         await DispatchBroadcastsAsync(broadcasts, ct).ConfigureAwait(false);
+
+        if (_notifications is not null)
+        {
+            foreach (var (alertDto, escalated) in alertsToNotify)
+            {
+                _notifications.EnqueueAlert(alertDto, escalated);
+            }
+            foreach (var clusterDto in clustersToNotify.Values)
+            {
+                _notifications.EnqueueCluster(clusterDto);
+            }
+        }
 
         return results;
     }
@@ -268,7 +294,7 @@ public sealed class EventIngestionService : IDisposable
         return existing;
     }
 
-    private static async Task<(AlertEntity Alert, bool Created)> UpsertAlertAsync(
+    private static async Task<(AlertEntity Alert, bool Created, bool Escalated)> UpsertAlertAsync(
         SentinelDbContext db,
         PipelineResult result,
         ResponseDecision decision,
@@ -390,11 +416,12 @@ public sealed class EventIngestionService : IDisposable
             });
 
             db.Alerts.Add(alert);
-            return (alert, true);
+            return (alert, true, false);
         }
 
         // Mise à jour de l'alerte ouverte existante
         var previousScore = existing.Score;
+        var previousLevel = existing.Level;
         var previousCount = existing.EventCount;
 
         if (!string.IsNullOrWhiteSpace(existing.MitreTechniquesJson))
@@ -448,7 +475,8 @@ public sealed class EventIngestionService : IDisposable
             });
         }
 
-        return (existing, false);
+        var escalated = existing.Level > previousLevel;
+        return (existing, false, escalated);
     }
 
     private static async Task<List<ActionTicketEntity>> CreateActionTicketsAsync(

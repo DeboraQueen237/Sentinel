@@ -144,6 +144,16 @@ builder.Services.AddGrpc(o =>
 builder.Services.AddSentinelCore();
 
 // Services métier Sentinel.Server
+builder.Services.AddHttpClient(AlertNotificationService.HttpClientName, client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(12);
+});
+builder.Services.AddSingleton<NotificationSecretStore>();
+builder.Services.AddSingleton<ISmtpMailTransport, SystemSmtpMailTransport>();
+builder.Services.AddSingleton<AlertNotificationService>();
+builder.Services.AddSingleton<IAlertNotificationDispatcher>(sp => sp.GetRequiredService<AlertNotificationService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AlertNotificationService>());
+
 builder.Services.AddSingleton<AuthService>();
 builder.Services.AddSingleton<AgentCommandHub>();
 builder.Services.AddSingleton<LiveBroadcaster>();
@@ -179,6 +189,7 @@ app.MapReportEndpoints();
 app.MapSettingsEndpoints();
 app.MapAuditEndpoints();
 app.MapV2DetectionEndpoints();
+app.MapNotificationAndLlmEndpoints();
 
 app.Run();
 

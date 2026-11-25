@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Sentinel.AI;
 using Sentinel.Core.Abstractions;
 using Sentinel.Server.Configuration;
 using Sentinel.Server.Services;
@@ -13,7 +14,7 @@ namespace Sentinel.Server.Endpoints;
 internal static class SystemEndpoints
 {
     private static readonly string ServerVersion =
-        Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
+        Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "2.1.0";
 
     public static void MapSystemEndpoints(this IEndpointRouteBuilder app)
     {
@@ -22,6 +23,7 @@ internal static class SystemEndpoints
         app.MapGet(ApiRoutes.Health, async (
             IDbContextFactory<SentinelDbContext> dbFactory,
             IThreatPipeline pipeline,
+            ILlmAssessor llm,
             AgentCommandHub commandHub,
             IOptions<SentinelServerOptions> options,
             CancellationToken ct) =>
@@ -39,6 +41,7 @@ internal static class SystemEndpoints
 
             var stats = pipeline.Stats;
             var settings = pipeline.Settings;
+            var activeModel = !string.IsNullOrWhiteSpace(llm.ActiveModel) ? llm.ActiveModel : settings.Llm.Model;
             var llmRatio = stats.EventsProcessed > 0
                 ? Math.Round((double)stats.LlmCalls / stats.EventsProcessed, 4)
                 : 0.0;
@@ -50,7 +53,7 @@ internal static class SystemEndpoints
                 StartedAt: options.Value.StartedAt,
                 DatabaseOk: dbOk,
                 LlmAvailable: stats.LlmAvailable,
-                LlmModel: settings.Llm.Model,
+                LlmModel: activeModel,
                 LlmAvgLatencyMs: stats.AvgLlmLatencyMs,
                 EventsProcessed: stats.EventsProcessed,
                 AvgPipelineLatencyMs: stats.AvgPipelineLatencyMs,

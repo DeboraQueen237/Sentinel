@@ -24,6 +24,7 @@ public sealed class StartupInitializationService : IHostedService
     private readonly SentinelDbInitializer _dbInitializer;
     private readonly IDbContextFactory<SentinelDbContext> _dbFactory;
     private readonly IThreatPipeline _pipeline;
+    private readonly IAlertNotificationDispatcher _notifications;
     private readonly IHostEnvironment _environment;
     private readonly ILogger<StartupInitializationService> _logger;
 
@@ -31,12 +32,14 @@ public sealed class StartupInitializationService : IHostedService
         SentinelDbInitializer dbInitializer,
         IDbContextFactory<SentinelDbContext> dbFactory,
         IThreatPipeline pipeline,
+        IAlertNotificationDispatcher notifications,
         IHostEnvironment environment,
         ILogger<StartupInitializationService> logger)
     {
         _dbInitializer = dbInitializer;
         _dbFactory = dbFactory;
         _pipeline = pipeline;
+        _notifications = notifications;
         _environment = environment;
         _logger = logger;
     }
@@ -83,6 +86,7 @@ public sealed class StartupInitializationService : IHostedService
         }
 
         _pipeline.UpdateSettings(settings);
+        _notifications.UpdateSettings(settings.Notifications ?? new NotificationSettings());
 
         // 3. Restauration de la baseline comportementale
         var snapshot = await db.BaselineSnapshots

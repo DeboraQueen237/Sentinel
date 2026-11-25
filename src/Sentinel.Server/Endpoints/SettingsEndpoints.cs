@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Sentinel.AI;
 using Sentinel.Core.Abstractions;
 using Sentinel.Server.Hubs;
+using Sentinel.Server.Services;
 using Sentinel.Shared.Api;
 using Sentinel.Shared.Json;
 using Sentinel.Shared.Models;
@@ -37,12 +39,19 @@ internal static class SettingsEndpoints
             HttpContext ctx,
             IDbContextFactory<SentinelDbContext> dbFactory,
             IThreatPipeline pipeline,
+            ILlmAssessor llm,
+            IAlertNotificationDispatcher notifications,
             HashChainWriter auditWriter,
             LiveBroadcaster broadcaster,
             CancellationToken ct) =>
         {
             if (settings is null)
                 return EndpointHelpers.Error(StatusCodes.Status400BadRequest, "INVALID_SETTINGS", "Objet de paramètres requis.");
+
+            settings.Notifications ??= new NotificationSettings();
+            settings.Notifications.Email ??= new EmailNotificationSettings();
+            settings.Notifications.WhatsApp ??= new WhatsAppNotificationSettings();
+            settings.Notifications.Webhook ??= new WebhookNotificationSettings();
 
             var validationError = ValidateSettings(settings);
             if (validationError is not null)
@@ -81,12 +90,17 @@ internal static class SettingsEndpoints
             }
 
             pipeline.UpdateSettings(settings);
+            notifications.UpdateSettings(settings.Notifications);
+            if (settings.Llm.Enabled && settings.Llm.AutoSelectBestQwen)
+            {
+                _ = Task.Run(() => llm.CheckHealthAsync(CancellationToken.None), CancellationToken.None);
+            }
 
             await auditWriter.WriteAuditAsync(
                 EndpointHelpers.GetActor(ctx),
                 "SettingsUpdated",
                 "settings:global",
-                $"Version={newVersion}, Mode={settings.Mode}, Seuils=[{settings.Thresholds.Low}/{settings.Thresholds.Moderate}/{settings.Thresholds.High}/{settings.Thresholds.Critical}], LLM={settings.Llm.Enabled} ({settings.Llm.Model}), Corrélation={settings.Correlation.Enabled}.",
+                $"Version={newVersion}, Mode={settings.Mode}, Seuils=[{settings.Thresholds.Low}/{settings.Thresholds.Moderate}/{settings.Thresholds.High}/{settings.Thresholds.Critical}], LLM={settings.Llm.Enabled} ({settings.Llm.Model}, AutoQwen={settings.Llm.AutoSelectBestQwen}), Notif={settings.Notifications.Enabled} (Email={settings.Notifications.Email.Enabled}, WA={settings.Notifications.WhatsApp.Enabled}, WH={settings.Notifications.Webhook.Enabled}), Corrélation={settings.Correlation.Enabled}.",
                 EndpointHelpers.GetClientIp(ctx),
                 ct).ConfigureAwait(false);
 
@@ -125,6 +139,21 @@ internal static class SettingsEndpoints
             s.Correlation.LongWindowHours < 1)
         {
             return "Les fenêtres de corrélation doivent être strictement positives et ordonnées (Short <= Medium).";
+        }
+
+        if (s.Notifications is not null)
+        {
+            if (s.Notifications.CooldownMinutes < 0 || s.Notifications.CooldownMinutes > 1440)
+                return "Le délai anti-spam des notifications doit être compris entre 0 et 1440 minutes.";
+            if (s.Notifications.Email.SmtpPort is < 1 or > 65535)
+                return "Le port SMTP doit être compris entre 1 et 65535.";
+            if (s.Notifications.Enabled && s.Notifications.Webhook.Enabled &&
+                !string.Equals(s.Notifications.Webhook.Format, "Telegram", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(s.Notifications.Webhook.Url) &&
+                !AlertNotificationService.IsAllowedWebhookUrl(s.Notifications.Webhook.Url))
+            {
+                return "L'URL Webhook doit utiliser HTTPS (ou http://127.0.0.1 pour les tests locaux).";
+            }
         }
 
         return null;
