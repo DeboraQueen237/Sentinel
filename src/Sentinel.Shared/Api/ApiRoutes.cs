@@ -60,6 +60,13 @@ public static class ApiRoutes
     public const string Health = "/api/system/health";                // GET -> SystemHealthDto
     public const string Ping = "/api/system/ping";                    // GET (anonyme) -> "pong"
     public const string AgentsHealth = "/api/system/agents";          // GET -> AgentHealthDto[]
+    public const string LlmStatus = "/api/system/llm";                // GET -> LlmStatusDto
+    public const string LlmSelectBest = "/api/system/llm/autoselect"; // POST -> LlmStatusDto
+
+    // Notifications externes administrateur (v2.1 — Email, WhatsApp, Webhook/Slack/Teams/Telegram)
+    public const string NotificationStatus = "/api/notifications/status";   // GET -> NotificationStatusDto
+    public const string NotificationTest = "/api/notifications/test";       // POST NotificationTestRequest -> NotificationDeliveryDto
+    public const string NotificationSecrets = "/api/notifications/secrets"; // PUT NotificationSecretsRequest -> NotificationSecretsStatusDto
 
     // Threat Intelligence (v2 M4)
     public const string ThreatIntelStatus = "/api/intel/status";      // GET -> ThreatIntelStatusDto

@@ -38,6 +38,7 @@ public sealed class SentinelSettings
     public StaticScanSettings StaticScan { get; set; } = new();
     public RulesSettings Rules { get; set; } = new();
     public MlSettings MachineLearning { get; set; } = new();
+    public NotificationSettings Notifications { get; set; } = new();
     /// <summary>Langue préférée de la console ("fr" ou "en").</summary>
     public string Language { get; set; } = "fr";
 }
@@ -47,8 +48,10 @@ public sealed class LlmSettings
     public bool Enabled { get; set; } = true;
     public string Endpoint { get; set; } = "http://localhost:11434";
     public string Model { get; set; } = "qwen2.5-coder:3b";
+    /// <summary>Sélectionne automatiquement le meilleur modèle Qwen déjà installé localement dans Ollama selon la RAM du poste.</summary>
+    public bool AutoSelectBestQwen { get; set; } = true;
     public string EmbeddingModel { get; set; } = "nomic-embed-text";
-    public int TimeoutSeconds { get; set; } = 10;
+    public int TimeoutSeconds { get; set; } = 45;
     /// <summary>Le LLM n'est appelé que si le score des règles est dans cette bande « ambiguë » (doc §7.1).</summary>
     public int AmbiguityLow { get; set; } = 25;
     public int AmbiguityHigh { get; set; } = 80;
@@ -56,6 +59,80 @@ public sealed class LlmSettings
     public double MinConfidence { get; set; } = 0.5;
     /// <summary>Nombre max d'appels LLM simultanés.</summary>
     public int MaxConcurrency { get; set; } = 1;
+    /// <summary>Durée de maintien du modèle en RAM/VRAM par Ollama (ex. "10m", "30m").</summary>
+    public string KeepAlive { get; set; } = "10m";
+    /// <summary>Taille de fenêtre de contexte Ollama (num_ctx) optimisée pour faible latence locale.</summary>
+    public int ContextWindow { get; set; } = 2048;
+    /// <summary>Nombre maximal de tokens générés (num_predict) pour une sortie JSON concise et rapide.</summary>
+    public int MaxOutputTokens { get; set; } = 160;
+    /// <summary>Active le cache sémantique TTL en mémoire pour éviter les appels redondants sur rafales similaires.</summary>
+    public bool EnableResponseCache { get; set; } = true;
+    /// <summary>Durée de vie du cache sémantique LLM en minutes.</summary>
+    public int CacheTtlMinutes { get; set; } = 5;
+    /// <summary>Précharge le modèle sélectionné au démarrage du serveur pour éliminer la latence à froid.</summary>
+    public bool WarmUpOnStartup { get; set; } = true;
+}
+
+/// <summary>
+/// Paramètres de notifications externes administrateur par niveau de criticité (opt-in strict, métadonnées uniquement).
+/// Les secrets (mot de passe SMTP, jetons WhatsApp/Telegram, clé HMAC) ne sont JAMAIS stockés ici :
+/// ils sont chiffrés au repos via DPAPI dans <c>SentinelPaths.NotificationSecretsFile</c>.
+/// </summary>
+public sealed class NotificationSettings
+{
+    public bool Enabled { get; set; } = false;
+    /// <summary>Délai anti-spam (minutes) entre deux notifications identiques sur un même canal ; contourné immédiatement en cas d'escalade de criticité.</summary>
+    public int CooldownMinutes { get; set; } = 5;
+    /// <summary>Envoie également une notification lorsqu'un cluster corrélé atteint ou dépasse le niveau minimal configuré.</summary>
+    public bool NotifyOnCorrelatedCluster { get; set; } = true;
+    public bool IncludeDashboardUrl { get; set; } = true;
+    public string DashboardBaseUrl { get; set; } = "http://127.0.0.1:5200";
+
+    public EmailNotificationSettings Email { get; set; } = new();
+    public WhatsAppNotificationSettings WhatsApp { get; set; } = new();
+    public WebhookNotificationSettings Webhook { get; set; } = new();
+}
+
+public sealed class EmailNotificationSettings
+{
+    public bool Enabled { get; set; } = false;
+    public ThreatLevel MinLevel { get; set; } = ThreatLevel.High;
+    public string SmtpHost { get; set; } = string.Empty;
+    public int SmtpPort { get; set; } = 587;
+    public bool UseStartTls { get; set; } = true;
+    public string Username { get; set; } = string.Empty;
+    public string FromAddress { get; set; } = string.Empty;
+    public string FromName { get; set; } = "SENTINEL SOC";
+    public List<string> Recipients { get; set; } = new();
+}
+
+public sealed class WhatsAppNotificationSettings
+{
+    public bool Enabled { get; set; } = false;
+    public ThreatLevel MinLevel { get; set; } = ThreatLevel.Critical;
+    /// <summary>Fournisseur API officiel : "MetaCloud" (Graph API) ou "Twilio".</summary>
+    public string Provider { get; set; } = "MetaCloud";
+    /// <summary>Identifiant du numéro expéditeur Meta WhatsApp Business Cloud API.</summary>
+    public string PhoneNumberId { get; set; } = string.Empty;
+    /// <summary>Account SID Twilio (utilisé si Provider = "Twilio").</summary>
+    public string AccountSid { get; set; } = string.Empty;
+    /// <summary>Numéro expéditeur Twilio au format whatsapp:+14155238886.</summary>
+    public string FromNumber { get; set; } = string.Empty;
+    public string ApiVersion { get; set; } = "v21.0";
+    /// <summary>Numéros destinataires administrateurs au format international E.164 (ex. +2376XXXXXXXX).</summary>
+    public List<string> Recipients { get; set; } = new();
+}
+
+public sealed class WebhookNotificationSettings
+{
+    public bool Enabled { get; set; } = false;
+    public ThreatLevel MinLevel { get; set; } = ThreatLevel.High;
+    /// <summary>Format de charge utile : "GenericJson", "Slack", "Teams", "Discord" ou "Telegram".</summary>
+    public string Format { get; set; } = "GenericJson";
+    /// <summary>URL HTTPS cible (inutile pour Telegram si le jeton bot est renseigné dans les secrets).</summary>
+    public string Url { get; set; } = string.Empty;
+    /// <summary>Identifiant de chat/groupe Telegram (utilisé lorsque Format = "Telegram").</summary>
+    public string TelegramChatId { get; set; } = string.Empty;
 }
 
 public sealed class CanarySettings

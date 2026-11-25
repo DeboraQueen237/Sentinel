@@ -50,6 +50,7 @@ public static class SentinelPaths
     public static string CanariesRegistryFile => Path.Combine(Data, "canaries.json");
     public static string MlModelFile => Path.Combine(Models, "pe-classifier.zip");
     public static string MlModelMetadataFile => Path.Combine(Models, "pe-classifier.meta.json");
+    public static string NotificationSecretsFile => Path.Combine(Secrets, "notifications-secrets.dpapi");
 
     private static string Ensure(string sub)
     {

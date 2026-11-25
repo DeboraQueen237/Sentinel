@@ -37,4 +37,8 @@ public sealed record LlmMetrics(
     double AvgLatencyMs,
     bool IsAvailable,
     DateTimeOffset? LastCheckedAt,
-    DateTimeOffset? NextRetryAt);
+    DateTimeOffset? NextRetryAt,
+    long CacheHits = 0,
+    string? ActiveModel = null,
+    bool AutoSelected = false,
+    bool WarmedUp = false);

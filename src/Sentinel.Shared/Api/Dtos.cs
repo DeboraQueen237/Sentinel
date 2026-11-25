@@ -378,3 +378,82 @@ public sealed record ClusterNarrativeDto(
     double ChainProbability,
     IReadOnlyList<string> MitreTactics,
     IReadOnlyList<ScoreContribution> Contributions);
+
+// ----------------------------------------------------------------------------- Extensions v2.1 (IA Qwen optimisée & Notifications multi-canaux)
+public sealed record OllamaModelInfoDto(
+    string Name,
+    long SizeBytes,
+    string? Family,
+    string? ParameterSize,
+    string? QuantizationLevel,
+    bool IsQwen,
+    bool Selected);
+
+public sealed record LlmStatusDto(
+    bool Enabled,
+    bool Available,
+    string Endpoint,
+    string ConfiguredModel,
+    string ActiveModel,
+    bool AutoSelectBestQwen,
+    bool AutoSelected,
+    string SelectionReason,
+    double HostRamGb,
+    long Calls,
+    long Successes,
+    long Failures,
+    long CacheHits,
+    double AvgLatencyMs,
+    int ContextWindow,
+    int MaxOutputTokens,
+    string KeepAlive,
+    bool WarmedUp,
+    IReadOnlyList<OllamaModelInfoDto> InstalledModels);
+
+public sealed record NotificationSecretsStatusDto(
+    bool HasSmtpPassword,
+    bool HasWhatsAppToken,
+    bool HasWebhookSecret,
+    string StorageMode);
+
+public sealed record NotificationSecretsRequest(
+    string? SmtpPassword = null,
+    string? WhatsAppAccessToken = null,
+    string? WebhookSecret = null,
+    bool ClearSmtpPassword = false,
+    bool ClearWhatsAppToken = false,
+    bool ClearWebhookSecret = false);
+
+public sealed record NotificationTestRequest(string Channel);
+
+public sealed record NotificationDeliveryDto(
+    Guid Id,
+    DateTimeOffset Timestamp,
+    string Channel,
+    string TriggerKind,
+    ThreatLevel Level,
+    string HostId,
+    string Summary,
+    bool Success,
+    string? Error,
+    int Attempts,
+    double ElapsedMs);
+
+public sealed record NotificationStatusDto(
+    bool GlobalEnabled,
+    bool EmailEnabled,
+    ThreatLevel EmailMinLevel,
+    bool WhatsAppEnabled,
+    ThreatLevel WhatsAppMinLevel,
+    string WhatsAppProvider,
+    bool WebhookEnabled,
+    ThreatLevel WebhookMinLevel,
+    string WebhookFormat,
+    int CooldownMinutes,
+    bool NotifyOnCorrelatedCluster,
+    int QueuedCount,
+    long TotalSent,
+    long TotalFailed,
+    long SuppressedByCooldown,
+    NotificationSecretsStatusDto Secrets,
+    IReadOnlyList<NotificationDeliveryDto> RecentDeliveries);

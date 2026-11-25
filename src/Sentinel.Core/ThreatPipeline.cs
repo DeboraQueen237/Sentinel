@@ -471,12 +471,19 @@ public sealed class ThreatPipeline : IThreatPipeline
             Enabled = s.Llm.Enabled,
             Endpoint = s.Llm.Endpoint,
             Model = s.Llm.Model,
+            AutoSelectBestQwen = s.Llm.AutoSelectBestQwen,
             EmbeddingModel = s.Llm.EmbeddingModel,
             TimeoutSeconds = s.Llm.TimeoutSeconds,
             AmbiguityLow = s.Llm.AmbiguityLow,
             AmbiguityHigh = s.Llm.AmbiguityHigh,
             MinConfidence = s.Llm.MinConfidence,
-            MaxConcurrency = s.Llm.MaxConcurrency
+            MaxConcurrency = s.Llm.MaxConcurrency,
+            KeepAlive = s.Llm.KeepAlive,
+            ContextWindow = s.Llm.ContextWindow,
+            MaxOutputTokens = s.Llm.MaxOutputTokens,
+            EnableResponseCache = s.Llm.EnableResponseCache,
+            CacheTtlMinutes = s.Llm.CacheTtlMinutes,
+            WarmUpOnStartup = s.Llm.WarmUpOnStartup
         },
         Correlation = new CorrelationSettings
         {
@@ -545,6 +552,55 @@ public sealed class ThreatPipeline : IThreatPipeline
             MaxScoreContribution = s.MachineLearning.MaxScoreContribution,
             SuspiciousProbabilityThreshold = s.MachineLearning.SuspiciousProbabilityThreshold
         },
+        Notifications = CloneNotifications(s.Notifications),
         Language = s.Language
     };
+
+    private static NotificationSettings CloneNotifications(NotificationSettings? n)
+    {
+        n ??= new NotificationSettings();
+        var email = n.Email ?? new EmailNotificationSettings();
+        var wa = n.WhatsApp ?? new WhatsAppNotificationSettings();
+        var wh = n.Webhook ?? new WebhookNotificationSettings();
+
+        return new NotificationSettings
+        {
+            Enabled = n.Enabled,
+            CooldownMinutes = n.CooldownMinutes,
+            NotifyOnCorrelatedCluster = n.NotifyOnCorrelatedCluster,
+            IncludeDashboardUrl = n.IncludeDashboardUrl,
+            DashboardBaseUrl = n.DashboardBaseUrl,
+            Email = new EmailNotificationSettings
+            {
+                Enabled = email.Enabled,
+                MinLevel = email.MinLevel,
+                SmtpHost = email.SmtpHost,
+                SmtpPort = email.SmtpPort,
+                UseStartTls = email.UseStartTls,
+                Username = email.Username,
+                FromAddress = email.FromAddress,
+                FromName = email.FromName,
+                Recipients = new List<string>(email.Recipients ?? [])
+            },
+            WhatsApp = new WhatsAppNotificationSettings
+            {
+                Enabled = wa.Enabled,
+                MinLevel = wa.MinLevel,
+                Provider = wa.Provider,
+                PhoneNumberId = wa.PhoneNumberId,
+                AccountSid = wa.AccountSid,
+                FromNumber = wa.FromNumber,
+                ApiVersion = wa.ApiVersion,
+                Recipients = new List<string>(wa.Recipients ?? [])
+            },
+            Webhook = new WebhookNotificationSettings
+            {
+                Enabled = wh.Enabled,
+                MinLevel = wh.MinLevel,
+                Format = wh.Format,
+                Url = wh.Url,
+                TelegramChatId = wh.TelegramChatId
+            }
+        };
+    }
 }

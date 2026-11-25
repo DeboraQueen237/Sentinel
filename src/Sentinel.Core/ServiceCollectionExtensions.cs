@@ -151,7 +151,11 @@ internal sealed class OllamaHealthMonitorService : BackgroundService
     {
         try
         {
-            await _llm.CheckHealthAsync(stoppingToken).ConfigureAwait(false);
+            var healthy = await _llm.CheckHealthAsync(stoppingToken).ConfigureAwait(false);
+            if (healthy)
+            {
+                await _llm.WarmUpAsync(stoppingToken).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -169,7 +173,11 @@ internal sealed class OllamaHealthMonitorService : BackgroundService
             {
                 try
                 {
-                    await _llm.CheckHealthAsync(stoppingToken).ConfigureAwait(false);
+                    var healthy = await _llm.CheckHealthAsync(stoppingToken).ConfigureAwait(false);
+                    if (healthy && !_llm.Metrics.WarmedUp)
+                    {
+                        await _llm.WarmUpAsync(stoppingToken).ConfigureAwait(false);
+                    }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {

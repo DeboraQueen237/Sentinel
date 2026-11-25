@@ -9,12 +9,15 @@ using Sentinel.Shared.Models;
 namespace Sentinel.AI;
 
 /// <summary>
-/// Client HTTP léger vers Ollama local (<c>POST /api/chat</c>, <c>GET /api/tags</c>, <c>POST /api/embeddings</c>).
-/// Intègre sémaphore de concurrence, cache de disponibilité et backoff exponentiel (5 s → 15 s → 60 s)
-/// afin que l'absence d'Ollama n'introduise aucun ralentissement sur le pipeline.
+/// Client HTTP optimisé vers Ollama local (<c>POST /api/chat</c>, <c>GET /api/tags</c>, <c>POST /api/generate</c>, <c>POST /api/embeddings</c>).
+/// Sélectionne automatiquement le meilleur modèle Qwen déjà installé localement selon la RAM du poste,
+/// maintient le modèle en mémoire (<c>keep_alive</c> + préchauffage), borne <c>num_ctx</c> et <c>num_predict</c>,
+/// met en cache les évaluations sémantiquement similaires sur les rafales et applique un backoff exponentiel (5 s → 15 s → 60 s).
 /// </summary>
 public sealed class OllamaAssessor : ILlmAssessor, IDisposable
 {
+    private const int MaxCacheEntries = 256;
+
     private static readonly TimeSpan[] BackoffSteps =
     [
         TimeSpan.FromSeconds(5),
@@ -28,13 +31,20 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
     private readonly bool _ownsHttpClient;
     private readonly ILogger<OllamaAssessor> _logger;
     private readonly TimeProvider _clock;
+    private readonly double _hostRamGbOverride;
     private readonly object _stateGate = new();
+    private readonly object _cacheGate = new();
+    private readonly Dictionary<string, CachedAssessment> _responseCache = new(StringComparer.Ordinal);
+    private readonly Queue<string> _cacheInsertionOrder = new();
 
     private volatile LlmSettings _settings;
     private SemaphoreSlim _concurrencyGate;
     private int _currentMaxConcurrency;
 
     private bool _isAvailable;
+    private bool _warmedUp;
+    private string _activeModel;
+    private OllamaModelSelection? _lastSelection;
     private int _consecutiveFailures;
     private DateTimeOffset? _lastCheckedAt;
     private DateTimeOffset? _nextRetryAt;
@@ -42,14 +52,21 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
     private long _calls;
     private long _successes;
     private long _failures;
+    private long _cacheHits;
     private long _totalLatencyMicros;
     private bool _disposed;
+
+    private sealed record CachedAssessment(
+        LlmAssessmentResult Result,
+        Guid OriginEventId,
+        DateTimeOffset ExpiresAt);
 
     public OllamaAssessor(
         HttpClient? httpClient = null,
         LlmSettings? settings = null,
         ILogger<OllamaAssessor>? logger = null,
-        TimeProvider? clock = null)
+        TimeProvider? clock = null,
+        double hostRamGbOverride = 0)
     {
         if (httpClient is null)
         {
@@ -63,8 +80,10 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
         }
 
         _settings = CloneSettings(settings ?? new LlmSettings());
+        _activeModel = string.IsNullOrWhiteSpace(_settings.Model) ? "qwen2.5-coder:3b" : _settings.Model.Trim();
         _logger = logger ?? NullLogger<OllamaAssessor>.Instance;
         _clock = clock ?? TimeProvider.System;
+        _hostRamGbOverride = hostRamGbOverride;
         _currentMaxConcurrency = Math.Max(1, _settings.MaxConcurrency);
         _concurrencyGate = new SemaphoreSlim(_currentMaxConcurrency, _currentMaxConcurrency);
     }
@@ -83,6 +102,30 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
     }
 
     /// <inheritdoc />
+    public string ActiveModel
+    {
+        get
+        {
+            lock (_stateGate)
+            {
+                return _activeModel;
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public OllamaModelSelection? LastSelection
+    {
+        get
+        {
+            lock (_stateGate)
+            {
+                return _lastSelection;
+            }
+        }
+    }
+
+    /// <inheritdoc />
     public LlmMetrics Metrics
     {
         get
@@ -90,6 +133,7 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
             var calls = Interlocked.Read(ref _calls);
             var successes = Interlocked.Read(ref _successes);
             var failures = Interlocked.Read(ref _failures);
+            var cacheHits = Interlocked.Read(ref _cacheHits);
             var totalMicros = Interlocked.Read(ref _totalLatencyMicros);
             var avgMs = calls > 0 ? (totalMicros / 1000.0) / calls : 0.0;
 
@@ -102,7 +146,11 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
                     Math.Round(avgMs, 2),
                     _settings.Enabled && _isAvailable,
                     _lastCheckedAt,
-                    _nextRetryAt);
+                    _nextRetryAt,
+                    cacheHits,
+                    _activeModel,
+                    _lastSelection?.AutoSelected ?? false,
+                    _warmedUp);
             }
         }
     }
@@ -112,8 +160,10 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
     {
         ArgumentNullException.ThrowIfNull(settings);
         var copy = CloneSettings(settings);
-        var endpointChanged = !string.Equals(_settings.Endpoint, copy.Endpoint, StringComparison.OrdinalIgnoreCase) ||
-                              !string.Equals(_settings.Model, copy.Model, StringComparison.OrdinalIgnoreCase);
+        var modelOrEndpointChanged =
+            !string.Equals(_settings.Endpoint, copy.Endpoint, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(_settings.Model, copy.Model, StringComparison.OrdinalIgnoreCase) ||
+            _settings.AutoSelectBestQwen != copy.AutoSelectBestQwen;
         _settings = copy;
 
         var desiredConcurrency = Math.Max(1, copy.MaxConcurrency);
@@ -129,64 +179,100 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
             {
                 _isAvailable = false;
                 _nextRetryAt = null;
+                _warmedUp = false;
             }
-            else if (endpointChanged)
+            else if (modelOrEndpointChanged)
             {
-                // Réinitialise le backoff pour permettre une nouvelle vérification sur le nouvel endpoint/modèle
+                // Réinitialise le backoff pour permettre une nouvelle détection immédiate
                 _consecutiveFailures = 0;
                 _nextRetryAt = null;
+                _warmedUp = false;
+                if (!copy.AutoSelectBestQwen && !string.IsNullOrWhiteSpace(copy.Model))
+                {
+                    _activeModel = copy.Model.Trim();
+                }
             }
+        }
+
+        if (modelOrEndpointChanged || !copy.EnableResponseCache)
+        {
+            ClearResponseCache();
         }
     }
 
     /// <inheritdoc />
-    public async Task<bool> CheckHealthAsync(CancellationToken ct = default)
-    {
-        var cfg = _settings;
-        if (!cfg.Enabled)
-        {
-            lock (_stateGate)
-            {
-                _isAvailable = false;
-                _lastCheckedAt = _clock.GetUtcNow();
-            }
-            return false;
-        }
+    public Task<bool> CheckHealthAsync(CancellationToken ct = default) =>
+        ProbeAndSelectModelAsync(bypassBackoff: false, ct);
 
-        var now = _clock.GetUtcNow();
+    /// <inheritdoc />
+    public async Task<OllamaModelSelection> RefreshModelSelectionAsync(CancellationToken ct = default)
+    {
+        await ProbeAndSelectModelAsync(bypassBackoff: true, ct).ConfigureAwait(false);
         lock (_stateGate)
         {
-            if (!_isAvailable && _nextRetryAt is { } next && now < next)
-            {
-                return false;
-            }
+            return _lastSelection ?? new OllamaModelSelection(
+                SelectedModel: _isAvailable ? _activeModel : null,
+                AutoSelected: false,
+                IsQwen: false,
+                HostRamGb: GetEffectiveRamGb(),
+                Reason: _settings.Enabled
+                    ? "Ollama local indisponible (vérifiez que le service Ollama écoute sur le port configuré)."
+                    : "Scoring LLM local désactivé dans les paramètres.",
+                Candidates: Array.Empty<OllamaInstalledModel>());
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> WarmUpAsync(CancellationToken ct = default)
+    {
+        var cfg = _settings;
+        if (!cfg.Enabled || !cfg.WarmUpOnStartup) return false;
+
+        string targetModel;
+        lock (_stateGate)
+        {
+            if (!_isAvailable || _warmedUp || string.IsNullOrWhiteSpace(_activeModel))
+                return _warmedUp;
+            targetModel = _activeModel;
         }
 
-        var url = $"{NormalizeEndpoint(cfg.Endpoint)}/api/tags";
-        var timeoutSeconds = Math.Clamp(cfg.TimeoutSeconds, 1, 5);
+        var gate = _concurrencyGate;
+        var acquired = false;
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        linkedCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+        linkedCts.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(cfg.TimeoutSeconds * 2, 10, 45)));
 
         try
         {
-            using var response = await _http.GetAsync(url, linkedCts.Token).ConfigureAwait(false);
+            await gate.WaitAsync(linkedCts.Token).ConfigureAwait(false);
+            acquired = true;
+
+            var url = $"{NormalizeEndpoint(cfg.Endpoint)}/api/generate";
+            var payload = new
+            {
+                model = targetModel,
+                prompt = string.Empty,
+                stream = false,
+                keep_alive = NormalizeKeepAlive(cfg.KeepAlive)
+            };
+
+            using var content = new StringContent(
+                JsonSerializer.Serialize(payload, SerializerOptions),
+                Encoding.UTF8,
+                "application/json");
+
+            using var response = await _http.PostAsync(url, content, linkedCts.Token).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                RecordUnavailable($"HTTP {(int)response.StatusCode} sur /api/tags");
                 return false;
             }
 
-            await using var stream = await response.Content.ReadAsStreamAsync(linkedCts.Token).ConfigureAwait(false);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: linkedCts.Token).ConfigureAwait(false);
-
-            var modelFound = HasConfiguredModel(doc.RootElement, cfg.Model);
-            if (!modelFound)
+            lock (_stateGate)
             {
-                RecordUnavailable($"Modèle Ollama '{cfg.Model}' introuvable dans /api/tags");
-                return false;
+                _warmedUp = true;
             }
 
-            MarkAvailable();
+            _logger.LogInformation("Modèle Ollama local préchargé en mémoire : {Model} (keep_alive={KeepAlive}).",
+                targetModel, NormalizeKeepAlive(cfg.KeepAlive));
             return true;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -195,43 +281,23 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
         }
         catch (Exception ex)
         {
-            RecordUnavailable($"Ollama injoignable ({ex.GetType().Name}: {ex.Message})");
+            _logger.LogDebug(ex, "Préchauffage Ollama ignoré pour {Model}.", targetModel);
             return false;
+        }
+        finally
+        {
+            if (acquired)
+            {
+                try { gate.Release(); } catch (ObjectDisposedException) { }
+            }
         }
     }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<string>> ListInstalledModelsAsync(CancellationToken ct = default)
     {
-        var cfg = _settings;
-        var url = $"{NormalizeEndpoint(cfg.Endpoint)}/api/tags";
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        linkedCts.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(cfg.TimeoutSeconds, 1, 5)));
-        try
-        {
-            using var response = await _http.GetAsync(url, linkedCts.Token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode) return Array.Empty<string>();
-            await using var stream = await response.Content.ReadAsStreamAsync(linkedCts.Token).ConfigureAwait(false);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: linkedCts.Token).ConfigureAwait(false);
-            if (!doc.RootElement.TryGetProperty("models", out var modelsEl) || modelsEl.ValueKind != JsonValueKind.Array)
-                return Array.Empty<string>();
-
-            var list = new List<string>();
-            foreach (var item in modelsEl.EnumerateArray())
-            {
-                var name = TryGetString(item, "name") ?? TryGetString(item, "model");
-                if (!string.IsNullOrWhiteSpace(name)) list.Add(name);
-            }
-            return list;
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            return Array.Empty<string>();
-        }
+        var models = await FetchInstalledModelsAsync(ct).ConfigureAwait(false);
+        return models.Select(m => m.Name).ToArray();
     }
 
     /// <inheritdoc />
@@ -243,11 +309,25 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
 
         // Backoff actif : repli instantané sans appel réseau
         var now = _clock.GetUtcNow();
+        string targetModel;
         lock (_stateGate)
         {
             if (!_isAvailable && _nextRetryAt is { } next && now < next)
             {
                 return null;
+            }
+            targetModel = string.IsNullOrWhiteSpace(_activeModel) ? cfg.Model : _activeModel;
+        }
+
+        // Cache sémantique TTL pour absorber les rafales d'événements similaires (< 0,1 ms)
+        string? cacheKey = null;
+        if (cfg.EnableResponseCache && cfg.CacheTtlMinutes > 0)
+        {
+            cacheKey = BuildSemanticCacheKey(targetModel, context);
+            if (TryGetCachedAssessment(cacheKey, context.Event.Id, now, out var cached))
+            {
+                Interlocked.Increment(ref _cacheHits);
+                return cached with { LatencyMs = 0.05 };
             }
         }
 
@@ -262,21 +342,41 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
         {
             await gate.WaitAsync(linkedCts.Token).ConfigureAwait(false);
             acquired = true;
+
+            // Double vérification du cache après attente du sémaphore (rafale concurrente d'événements distincts)
+            if (cacheKey is not null && TryGetCachedAssessment(cacheKey, context.Event.Id, _clock.GetUtcNow(), out var cachedAfterWait))
+            {
+                Interlocked.Increment(ref _cacheHits);
+                return cachedAfterWait with { LatencyMs = 0.05 };
+            }
+
             Interlocked.Increment(ref _calls);
 
-            var payload = new
+            var payload = new Dictionary<string, object>
             {
-                model = cfg.Model,
-                stream = false,
-                format = "json",
-                keep_alive = "10m",
-                options = new { temperature = 0 },
-                messages = new object[]
+                ["model"] = targetModel,
+                ["stream"] = false,
+                ["format"] = "json",
+                ["keep_alive"] = NormalizeKeepAlive(cfg.KeepAlive),
+                ["options"] = new
+                {
+                    temperature = 0,
+                    num_ctx = Math.Clamp(cfg.ContextWindow, 512, 8192),
+                    num_predict = Math.Clamp(cfg.MaxOutputTokens, 64, 512),
+                    top_p = 0.9
+                },
+                ["messages"] = new object[]
                 {
                     new { role = "system", content = PromptBuilder.SystemPrompt },
                     new { role = "user", content = PromptBuilder.BuildUserPrompt(context) }
                 }
             };
+
+            // Désactive le mode "thinking" verbeux sur Qwen3 / Qwen3.5 pour garantir un JSON temps réel rapide
+            if (IsThinkingCapableModel(targetModel))
+            {
+                payload["think"] = false;
+            }
 
             var url = $"{NormalizeEndpoint(cfg.Endpoint)}/api/chat";
             using var content = new StringContent(
@@ -291,7 +391,7 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
             if (!response.IsSuccessStatusCode)
             {
                 Interlocked.Increment(ref _failures);
-                RecordUnavailable($"HTTP {(int)response.StatusCode} sur /api/chat");
+                RecordUnavailable($"HTTP {(int)response.StatusCode} sur /api/chat (modèle={targetModel})");
                 return null;
             }
 
@@ -302,12 +402,19 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
             if (validated is null)
             {
                 Interlocked.Increment(ref _failures);
-                _logger.LogWarning("Réponse JSON Ollama invalide pour l'événement {EventId}, repli règles.", context.Event.Id);
+                _logger.LogWarning("Réponse JSON Ollama invalide pour l'événement {EventId} (modèle={Model}), repli règles.",
+                    context.Event.Id, targetModel);
                 return null;
             }
 
             MarkAvailable();
             Interlocked.Increment(ref _successes);
+
+            if (cacheKey is not null)
+            {
+                PutCachedAssessment(cacheKey, validated, context.Event.Id, _clock.GetUtcNow().AddMinutes(Math.Clamp(cfg.CacheTtlMinutes, 1, 60)));
+            }
+
             return validated;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -409,42 +516,187 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
 
     internal static bool HasConfiguredModel(JsonElement tagsRoot, string configuredModel)
     {
-        if (string.IsNullOrWhiteSpace(configuredModel)) return false;
-        if (!tagsRoot.TryGetProperty("models", out var modelsEl) || modelsEl.ValueKind != JsonValueKind.Array)
+        var parsed = OllamaModelSelector.ParseTagsResponse(tagsRoot);
+        return OllamaModelSelector.FindMatchingInstalled(parsed, configuredModel) is not null;
+    }
+
+    private async Task<bool> ProbeAndSelectModelAsync(bool bypassBackoff, CancellationToken ct)
+    {
+        var cfg = _settings;
+        if (!cfg.Enabled)
         {
+            lock (_stateGate)
+            {
+                _isAvailable = false;
+                _lastCheckedAt = _clock.GetUtcNow();
+            }
             return false;
         }
 
-        var target = configuredModel.Trim();
-        var targetHasTag = target.Contains(':');
-        var targetBase = targetHasTag ? target[..target.IndexOf(':')] : target;
-
-        foreach (var item in modelsEl.EnumerateArray())
+        var now = _clock.GetUtcNow();
+        if (!bypassBackoff)
         {
-            var name = TryGetString(item, "name") ?? TryGetString(item, "model");
-            if (string.IsNullOrWhiteSpace(name)) continue;
-
-            if (name.Equals(target, StringComparison.OrdinalIgnoreCase)) return true;
-
-            if (targetHasTag)
+            lock (_stateGate)
             {
-                // Préfixe exact avec tag (ex. "qwen2.5:7b" correspond à "qwen2.5:7b-instruct")
-                if (name.StartsWith(target, StringComparison.OrdinalIgnoreCase)) return true;
-                // Cas ":latest" implicite
-                if (target.EndsWith(":latest", StringComparison.OrdinalIgnoreCase) &&
-                    name.Equals(targetBase, StringComparison.OrdinalIgnoreCase))
+                if (!_isAvailable && _nextRetryAt is { } next && now < next)
                 {
-                    return true;
+                    return false;
                 }
-            }
-            else
-            {
-                // Modèle sans tag (ex. "qwen2.5" correspond à "qwen2.5:7b" ou "qwen2.5:latest")
-                if (name.StartsWith(targetBase + ":", StringComparison.OrdinalIgnoreCase)) return true;
             }
         }
 
+        var url = $"{NormalizeEndpoint(cfg.Endpoint)}/api/tags";
+        var timeoutSeconds = Math.Clamp(cfg.TimeoutSeconds, 1, 5);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        linkedCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        try
+        {
+            using var response = await _http.GetAsync(url, linkedCts.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                RecordUnavailable($"HTTP {(int)response.StatusCode} sur /api/tags");
+                return false;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(linkedCts.Token).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: linkedCts.Token).ConfigureAwait(false);
+
+            var installed = OllamaModelSelector.ParseTagsResponse(doc.RootElement);
+            var ramGb = GetEffectiveRamGb();
+            var selection = OllamaModelSelector.SelectBestModel(installed, cfg.Model, cfg.AutoSelectBestQwen, ramGb);
+
+            if (string.IsNullOrWhiteSpace(selection.SelectedModel))
+            {
+                lock (_stateGate)
+                {
+                    _lastSelection = selection;
+                }
+                RecordUnavailable(selection.Reason);
+                return false;
+            }
+
+            var modelSwitched = false;
+            lock (_stateGate)
+            {
+                modelSwitched = !string.Equals(_activeModel, selection.SelectedModel, StringComparison.OrdinalIgnoreCase);
+                _activeModel = selection.SelectedModel;
+                _lastSelection = selection;
+                if (modelSwitched)
+                {
+                    _warmedUp = false;
+                }
+            }
+
+            if (modelSwitched)
+            {
+                ClearResponseCache();
+                _logger.LogInformation("Modèle Ollama local sélectionné : {Model} ({Reason})", selection.SelectedModel, selection.Reason);
+            }
+
+            MarkAvailable();
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            RecordUnavailable($"Ollama injoignable ({ex.GetType().Name}: {ex.Message})");
+            return false;
+        }
+    }
+
+    private async Task<IReadOnlyList<OllamaInstalledModel>> FetchInstalledModelsAsync(CancellationToken ct)
+    {
+        var cfg = _settings;
+        var url = $"{NormalizeEndpoint(cfg.Endpoint)}/api/tags";
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        linkedCts.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(cfg.TimeoutSeconds, 1, 5)));
+        try
+        {
+            using var response = await _http.GetAsync(url, linkedCts.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return Array.Empty<OllamaInstalledModel>();
+            await using var stream = await response.Content.ReadAsStreamAsync(linkedCts.Token).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: linkedCts.Token).ConfigureAwait(false);
+            return OllamaModelSelector.ParseTagsResponse(doc.RootElement);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return Array.Empty<OllamaInstalledModel>();
+        }
+    }
+
+    private double GetEffectiveRamGb() =>
+        _hostRamGbOverride > 0.5 ? _hostRamGbOverride : OllamaModelSelector.GetHostRamGb();
+
+    private static string BuildSemanticCacheKey(string model, LlmScoringContext ctx)
+    {
+        var evt = ctx.Event;
+        var scoreBucket = (Math.Clamp(ctx.RuleScore, 0, 100) / 5) * 5;
+        var sortedRules = ctx.MatchedRules.Count == 0
+            ? string.Empty
+            : string.Join(',', ctx.MatchedRules.OrderBy(r => r, StringComparer.OrdinalIgnoreCase).Take(8));
+        var recentSig = ctx.RecentEvents.Count == 0
+            ? string.Empty
+            : string.Join(',', ctx.RecentEvents.TakeLast(4).Select(r => $"{r.Category}:{r.ThreatType}"));
+        var subjectNorm = PromptBuilder.SanitizeUntrusted(evt.Subject, 96).ToLowerInvariant();
+        return $"{model.ToLowerInvariant()}|{evt.Category}|{evt.EventType.ToLowerInvariant()}|{scoreBucket}|{ctx.RuleType}|{sortedRules}|{subjectNorm}|{recentSig}";
+    }
+
+    private bool TryGetCachedAssessment(string key, Guid eventId, DateTimeOffset now, out LlmAssessmentResult result)
+    {
+        lock (_cacheGate)
+        {
+            if (_responseCache.TryGetValue(key, out var entry))
+            {
+                if (entry.ExpiresAt <= now)
+                {
+                    _responseCache.Remove(key);
+                }
+                else if (entry.OriginEventId != eventId)
+                {
+                    // Ré-évaluation d'un même EventId force un appel frais ; un nouvel EventId similaire bénéficie du cache
+                    result = entry.Result;
+                    return true;
+                }
+            }
+        }
+
+        result = default!;
         return false;
+    }
+
+    private void PutCachedAssessment(string key, LlmAssessmentResult result, Guid originEventId, DateTimeOffset expiresAt)
+    {
+        lock (_cacheGate)
+        {
+            if (!_responseCache.ContainsKey(key))
+            {
+                _cacheInsertionOrder.Enqueue(key);
+            }
+            _responseCache[key] = new CachedAssessment(result, originEventId, expiresAt);
+
+            while (_responseCache.Count > MaxCacheEntries && _cacheInsertionOrder.Count > 0)
+            {
+                var oldest = _cacheInsertionOrder.Dequeue();
+                _responseCache.Remove(oldest);
+            }
+        }
+    }
+
+    private void ClearResponseCache()
+    {
+        lock (_cacheGate)
+        {
+            _responseCache.Clear();
+            _cacheInsertionOrder.Clear();
+        }
     }
 
     private static string? ExtractChatMessageContent(string rawBody)
@@ -476,13 +728,6 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
         }
         return null;
     }
-
-    private static string? TryGetString(JsonElement obj, string prop) =>
-        obj.ValueKind == JsonValueKind.Object &&
-        obj.TryGetProperty(prop, out var el) &&
-        el.ValueKind == JsonValueKind.String
-            ? el.GetString()
-            : null;
 
     private void MarkAvailable()
     {
@@ -524,17 +769,36 @@ public sealed class OllamaAssessor : ILlmAssessor, IDisposable
         return trimmed.TrimEnd('/');
     }
 
+    private static string NormalizeKeepAlive(string? keepAlive) =>
+        string.IsNullOrWhiteSpace(keepAlive) ? "10m" : keepAlive.Trim();
+
+    internal static bool IsThinkingCapableModel(string? modelName)
+    {
+        if (string.IsNullOrWhiteSpace(modelName)) return false;
+        var lower = modelName.ToLowerInvariant();
+        return lower.Contains("qwen3", StringComparison.Ordinal) ||
+               lower.Contains("qwq", StringComparison.Ordinal) ||
+               lower.Contains("deepseek-r1", StringComparison.Ordinal);
+    }
+
     private static LlmSettings CloneSettings(LlmSettings s) => new()
     {
         Enabled = s.Enabled,
         Endpoint = s.Endpoint,
         Model = s.Model,
+        AutoSelectBestQwen = s.AutoSelectBestQwen,
         EmbeddingModel = s.EmbeddingModel,
         TimeoutSeconds = s.TimeoutSeconds,
         AmbiguityLow = s.AmbiguityLow,
         AmbiguityHigh = s.AmbiguityHigh,
         MinConfidence = s.MinConfidence,
-        MaxConcurrency = s.MaxConcurrency
+        MaxConcurrency = s.MaxConcurrency,
+        KeepAlive = s.KeepAlive,
+        ContextWindow = s.ContextWindow,
+        MaxOutputTokens = s.MaxOutputTokens,
+        EnableResponseCache = s.EnableResponseCache,
+        CacheTtlMinutes = s.CacheTtlMinutes,
+        WarmUpOnStartup = s.WarmUpOnStartup
     };
 
     public void Dispose()
