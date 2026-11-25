@@ -183,14 +183,20 @@ public sealed class InstallerForm : Form
         });
 
         var diag = InstallerCore.DetectEnvironment();
+        var ollamaSummary = diag.OllamaReachable
+            ? (string.IsNullOrWhiteSpace(diag.SelectedOllamaModel)
+                ? $"Disponible ({string.Join(", ", diag.OllamaModels)})"
+                : $"Auto-sélectionné : {diag.SelectedOllamaModel} (installés : {string.Join(", ", diag.OllamaModels)})")
+            : "Hors ligne (repli déterministe sur règles actif)";
         panel.Controls.Add(new Label
         {
             Text = $"""
                 Diagnostic de ce poste :
-                  • Mémoire détectée : {diag.TotalRamGb:F1} Go — Modèle Ollama conseillé : {diag.RecommendedOllamaModel} (aucun téléchargement automatique)
+                  • Mémoire détectée : {diag.TotalRamGb:F1} Go — Modèle Qwen optimal : {diag.RecommendedOllamaModel} (aucun téléchargement automatique)
                   • Microsoft Defender : {diag.DefenderStatus}
                   • Sysmon (optionnel, jamais embarqué) : {(diag.SysmonInstalled ? "Détecté et exploitable" : "Absent (non requis)")}
-                  • Ollama local (:11434) : {(diag.OllamaReachable ? $"Disponible ({string.Join(", ", diag.OllamaModels)})" : "Hors ligne (repli déterministe actif)")}
+                  • Ollama local (:11434) : {ollamaSummary}
+                  • Alerting admin externe : Email SMTP, WhatsApp (Meta/Twilio), Slack/Teams/Telegram configurables dans Paramètres (opt-in, secrets chiffrés DPAPI)
                 """,
             AutoSize = true,
             MaximumSize = new Size(680, 0),

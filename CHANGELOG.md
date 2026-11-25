@@ -4,6 +4,22 @@ Toutes les évolutions notables de **SENTINEL** sont consignées ici selon le fo
 
 ---
 
+## [2.1.0] — 2026-11-25 (`main` / `develop`)
+
+### Ajouté
+- **Notifications administrateur automatiques multi-canaux par niveau de criticité** (`Sentinel.Server`, `Sentinel.Shared`, `Sentinel.Admin`) :
+  - Routage indépendant par seuil minimal (`Faible`, `Modéré`, `Élevé`, `Critique`) sur **Email (SMTP TLS/STARTTLS)**, **WhatsApp (Meta Cloud API v21.0 & Twilio)** et **Webhook / Slack / Microsoft Teams / Discord / Telegram** (avec signature `X-Sentinel-Signature` HMAC-SHA256 optionnelle).
+  - Déclenchement automatique sur création/escalade d'alerte ET sur **clusters corrélés** (`NotifyOnCorrelatedCluster`).
+  - File asynchrone non bloquante (`Channel<T>`), anti-spam par cooldown contourné immédiatement en cas d'escalade de criticité (`Élevé → Critique`), retries avec backoff, historique des 50 derniers envois et journalisation chaînée SHA-256.
+  - Confidentialité & sécurité strictes : opt-in (`Enabled = false` par défaut), métadonnées d'alerte assainies uniquement, secrets chiffrés au repos via **Windows DPAPI** (`NotificationSecretStore` + repli `dotnet user-secrets`), jamais persistés en clair dans SQLite ni dans les logs.
+  - Endpoints REST `/api/notifications/status`, `/api/notifications/test`, `/api/notifications/secrets` et section complète dans la console Blazor (`/settings`).
+- **Sélection automatique intelligente du meilleur modèle Qwen local & optimisation Ollama** (`Sentinel.AI`, `Sentinel.Core`, `Sentinel.Installer`) :
+  - `OllamaModelSelector` inspecte `GET /api/tags` (génération `qwen3` > `qwen2.5` > `qwen2` > `qwen`, taille paramétrique, quantification, taille sur disque) et la RAM hôte pour sélectionner automatiquement le meilleur modèle Qwen déjà installé localement sans jamais télécharger de modèle en silence ni saturer la RAM.
+  - Optimisation de l'inférence locale : prompt SOC compact anti prompt-injection, `keep_alive` configurable (`10m`), bornage `num_ctx` (`2048`) et `num_predict` (`160`), préchauffage au démarrage (`WarmUpAsync`) et cache sémantique TTL absorbant les rafales similaires en `< 0,1 ms`.
+  - Endpoints `/api/system/llm` et `/api/system/llm/autoselect`, indicateurs temps réel dans `/settings` et diagnostic intelligent dans `Sentinel.Installer` v2.1.0.
+
+---
+
 ## [2.0.0] — 2026-11-23 (`develop`)
 
 ### Ajouté

@@ -6,6 +6,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Win32;
+using Sentinel.AI;
 using Sentinel.Shared.Infrastructure;
 using Sentinel.Shared.Json;
 using Sentinel.Shared.Models;
@@ -31,7 +32,9 @@ public sealed record EnvironmentDiagnostic(
     bool SysmonInstalled,
     bool OllamaReachable,
     IReadOnlyList<string> OllamaModels,
-    string RecommendedOllamaModel);
+    string RecommendedOllamaModel,
+    string? SelectedOllamaModel = null,
+    string? OllamaSelectionReason = null);
 
 public sealed record InstallOptions(
     string InstallDirectory,
@@ -54,7 +57,7 @@ public sealed record InstallOptions(
 /// </summary>
 public static class InstallerCore
 {
-    public const string ProductVersion = "2.0.0";
+    public const string ProductVersion = "2.1.0";
     public const string NativeHostName = "com.sentinel.browserhost";
     public const string EmbeddedPayloadResourceName = "Sentinel.Installer.payload.zip";
 
@@ -76,7 +79,7 @@ public static class InstallerCore
         "Aucun stockage du texte brut du presse-papiers ni des mots de passe.",
         "Aucune lecture ni conservation du contenu des documents utilisateur.",
         "Aucun accès au contenu des messageries chiffrées (WhatsApp, Signal, Teams, etc.).",
-        "Aucun transfert de données utilisateur vers le cloud : analyse, ML et IA locale (Ollama) 100 % locaux.",
+        "Aucun transfert de données utilisateur vers le cloud : analyse, ML et IA locale (Ollama/Qwen) 100 % locaux ; les notifications administrateur externes (Email, WhatsApp, Webhook) sont strictement opt-in et n'envoient que des métadonnées d'alerte.",
         "Aucune suppression définitive automatique : toute action automatique est réversible en un clic."
     ];
 
@@ -104,10 +107,8 @@ public static class InstallerCore
     /// </summary>
     public static EnvironmentDiagnostic DetectEnvironment()
     {
-        var ramGb = Math.Round(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / (1024.0 * 1024.0 * 1024.0), 1);
-        var recommendedModel = ramGb <= 8.5 ? "qwen2.5-coder:1.5b"
-            : ramGb <= 20.0 ? "qwen2.5-coder:3b"
-            : "qwen2.5:7b";
+        var ramGb = OllamaModelSelector.GetHostRamGb();
+        var recommendedModel = OllamaModelSelector.RecommendQwenForRam(ramGb);
 
         // 1. Microsoft Defender
         var defenderActive = false;
@@ -143,9 +144,9 @@ public static class InstallerCore
         }
         catch { /* ignoré */ }
 
-        // 3. Ollama local (http://localhost:11434/api/tags — timeout court 2 s)
+        // 3. Ollama local (http://localhost:11434/api/tags — sélection intelligente du meilleur Qwen local)
         var ollamaReachable = false;
-        var models = new List<string>();
+        IReadOnlyList<OllamaInstalledModel> parsedModels = Array.Empty<OllamaInstalledModel>();
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
@@ -155,29 +156,24 @@ public static class InstallerCore
                 ollamaReachable = true;
                 var json = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
                 using var doc = JsonDocument.Parse(json);
-                if (doc.RootElement.TryGetProperty("models", out var arr) && arr.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var item in arr.EnumerateArray())
-                    {
-                        if (item.TryGetProperty("name", out var nameProp))
-                        {
-                            var name = nameProp.GetString();
-                            if (!string.IsNullOrWhiteSpace(name))
-                                models.Add(name);
-                        }
-                    }
-                }
+                parsedModels = OllamaModelSelector.ParseTagsResponse(doc.RootElement);
             }
         }
         catch { /* Ollama optionnel */ }
 
-        if (models.Any(m => m.StartsWith("qwen2.5-coder:3b", StringComparison.OrdinalIgnoreCase)))
+        var models = parsedModels.Select(m => m.Name).ToArray();
+        string? selectedModel = null;
+        string? selectionReason = null;
+
+        if (parsedModels.Count > 0)
         {
-            recommendedModel = "qwen2.5-coder:3b";
-        }
-        else if (models.Count > 0 && !models.Any(m => m.Equals(recommendedModel, StringComparison.OrdinalIgnoreCase)))
-        {
-            recommendedModel = $"{recommendedModel} (installé : {models[0]})";
+            var selection = OllamaModelSelector.SelectBestModel(parsedModels, recommendedModel, autoSelectBestQwen: true, ramGb);
+            selectedModel = selection.SelectedModel;
+            selectionReason = selection.Reason;
+            if (!string.IsNullOrWhiteSpace(selectedModel))
+            {
+                recommendedModel = selectedModel;
+            }
         }
 
         return new EnvironmentDiagnostic(
@@ -187,7 +183,9 @@ public static class InstallerCore
             sysmonInstalled,
             ollamaReachable,
             models,
-            recommendedModel);
+            recommendedModel,
+            selectedModel,
+            selectionReason);
     }
 
     public static ConsentRecord WriteSignedConsent(Action<string>? log = null)

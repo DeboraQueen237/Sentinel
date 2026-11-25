@@ -41,6 +41,7 @@
 - **Aucune inspection de messageries chiffrées** (WhatsApp, Signal, Telegram, Teams, Slack, e-mails).
 - **Aucune capture d'écran, webcam ou microphone**.
 - **Aucun envoi de fichiers utilisateur sur Internet** (même avec VirusTotal activé, seul le hash SHA-256 est interrogé sur demande explicite de l'administrateur).
+- **Notifications externes strictement opt-in (v2.1)** : les canaux administrateur (**Email SMTP**, **WhatsApp Meta Cloud/Twilio**, **Webhook/Slack/Teams/Telegram**) sont **désactivés par défaut**. Lorsqu'un administrateur les active explicitement, seules les **métadonnées d'alerte assainies** (criticité, score, nom de poste, type de menace, tags MITRE, résumé technique) sont transmises — jamais de fichiers, mots de passe, frappes ou texte du presse-papiers. Tous les jetons/mots de passe sont chiffrés localement par Windows DPAPI.
 - **Aucune suppression définitive automatique** : toute quarantaine est réversible.
 
 ---

@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Sentinel.Shared\Sentinel.Shared.csproj" />
+    <ProjectReference Include="..\Sentinel.AI\Sentinel.AI.csproj" />
   </ItemGroup>
   <ItemGroup Condition="'$(BundlePayloadZip)' != '' and Exists('$(BundlePayloadZip)')">
     <EmbeddedResource Include="$(BundlePayloadZip)" LogicalName="Sentinel.Installer.payload.zip" />

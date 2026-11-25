@@ -40,3 +40,18 @@
 - **Entraîner un modèle ML PE local** (depuis un dataset EMBER 2018 légal) : voir [docs/ml-evaluation.md](ml-evaluation.md)
 - **Activer PowerShell Script Block Logging (4104)** : `.\scripts\enable-script-logging.ps1` (en administrateur)
 - **Configurer une clé API abuse.ch / VirusTotal** : en dev `dotnet user-secrets set "ThreatIntel:AbuseChApiKey" "<clé>" --project src/Sentinel.Server`, en production via `SecretProtector` (DPAPI) — **jamais dans Git ni dans `appsettings.json`**.
+
+---
+
+## 4. Notifications administrateur externes par criticité & IA locale Qwen (v2.1)
+
+- **Notifications multi-canaux** (`/settings`, section *Notifications administrateur par criticité*) :
+  - Activation **opt-in** par interrupteur maître puis par canal (**Email SMTP TLS/STARTTLS**, **WhatsApp Meta Cloud API / Twilio**, **Webhook JSON HMAC-SHA256 / Slack / Microsoft Teams / Discord / Telegram**).
+  - Chaque canal dispose de son propre **seuil minimal de criticité** (`Faible`, `Modéré`, `Élevé`, `Critique`) et reçoit les alertes créées, les escalades ainsi que les **clusters corrélés** (`NotifyOnCorrelatedCluster`).
+  - L'anti-spam (`CooldownMinutes`) évite les doublons mais est **immédiatement contourné en cas d'escalade** (`Élevé → Critique`).
+  - Les identifiants (mot de passe SMTP, jeton WhatsApp/Twilio, secret HMAC / Bot Telegram) sont chiffrés via **DPAPI** (`PUT /api/notifications/secrets` → `%ProgramData%\Sentinel\Secrets\notifications-secrets.dpapi`) ou lus depuis `dotnet user-secrets` (`Notifications:SmtpPassword`, `Notifications:WhatsAppAccessToken`, `Notifications:WebhookSecret`).
+  - Utilisez les boutons **Tester Email / WhatsApp / Webhook** pour valider chaque canal et consulter l'historique récent des envois.
+- **Sélection automatique du meilleur modèle Qwen local** (`/settings`, section *IA locale Ollama*) :
+  - Par défaut (`AutoSelectBestQwen = true`), `OllamaModelSelector` inspecte `GET /api/tags` et sélectionne automatiquement le meilleur modèle Qwen **déjà installé sur le poste** selon la génération (`qwen3` > `qwen2.5` > `qwen2` > `qwen`), la taille paramétrique et la RAM disponible (aucun téléchargement automatique).
+  - L'inférence locale est optimisée via préchauffage au démarrage (`WarmUpOnStartup`), maintien mémoire (`keep_alive`), bornage `num_ctx` (`2048`) / `num_predict` (`160`) et cache sémantique TTL (`< 0,1 ms` sur rafales).
+  - Cliquez sur **Re-détecter le meilleur Qwen** (`POST /api/system/llm/autoselect`) après avoir installé un nouveau modèle via `ollama pull`.
