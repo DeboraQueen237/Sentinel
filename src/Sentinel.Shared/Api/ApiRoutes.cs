@@ -23,6 +23,8 @@ public static class ApiRoutes
     public const string AlertReject = "/api/alerts/{id:guid}/reject";       // POST (faux positif)  -> AlertDto
     public const string AlertAcknowledge = "/api/alerts/{id:guid}/acknowledge"; // POST -> AlertDto
     public const string AlertResolve = "/api/alerts/{id:guid}/resolve";     // POST -> AlertDto
+    public const string AlertAiAnalyze = "/api/alerts/{id:guid}/ai-analyze"; // POST -> AiIncidentAnalysisDto
+    public const string AlertsPurgeDuplicates = "/api/alerts/purge-duplicates"; // POST -> PurgeDuplicatesResultDto
 
     // Événements
     public const string Events = "/api/events";                       // GET ?category&minScore&hostId&search&from&to&page&pageSize -> PagedResult<EventDto>
@@ -31,6 +33,7 @@ public static class ApiRoutes
     // Clusters / graphe
     public const string Clusters = "/api/clusters";                   // GET ?minScore&hostId&from&to&page&pageSize -> PagedResult<ClusterDto>
     public const string ClusterById = "/api/clusters/{id:guid}";      // GET -> ClusterDto
+    public const string ClusterAiAnalyze = "/api/clusters/{id:guid}/ai-analyze"; // POST -> AiIncidentAnalysisDto
     public const string Graph = "/api/graph";                         // GET ?from&to&hostId&minScore&clusterId&limit -> GraphDto
 
     // Actions & blocages
@@ -62,11 +65,18 @@ public static class ApiRoutes
     public const string AgentsHealth = "/api/system/agents";          // GET -> AgentHealthDto[]
     public const string LlmStatus = "/api/system/llm";                // GET -> LlmStatusDto
     public const string LlmSelectBest = "/api/system/llm/autoselect"; // POST -> LlmStatusDto
+    public const string SystemScan = "/api/system/scan";              // POST SystemScanRequest -> SystemScanReportDto
+    public const string SystemScanLast = "/api/system/scan/last";     // GET -> SystemScanReportDto?
+    public const string SystemSecurityAudit = "/api/system/security-audit";      // POST -> SecurityAuditReportDto
+    public const string SystemSecurityAuditLast = "/api/system/security-audit/last"; // GET -> SecurityAuditReportDto?
+    public const string DemoRun = "/api/demo/run";                    // POST DemoRunRequest -> DemoScenarioResultDto
 
-    // Notifications externes administrateur (v2.1 — Email, WhatsApp, Webhook/Slack/Teams/Telegram)
+    // Notifications administrateur (v2.2 — In-App, Email, SMS, WhatsApp, Webhook/Slack/Teams/Telegram)
     public const string NotificationStatus = "/api/notifications/status";   // GET -> NotificationStatusDto
     public const string NotificationTest = "/api/notifications/test";       // POST NotificationTestRequest -> NotificationDeliveryDto
     public const string NotificationSecrets = "/api/notifications/secrets"; // PUT NotificationSecretsRequest -> NotificationSecretsStatusDto
+    public const string NotificationInbox = "/api/notifications/inbox";     // GET -> InAppNotificationDto[]
+    public const string NotificationInboxReadAll = "/api/notifications/inbox/read-all"; // POST -> int
 
     // Threat Intelligence (v2 M4)
     public const string ThreatIntelStatus = "/api/intel/status";      // GET -> ThreatIntelStatusDto
@@ -124,4 +134,5 @@ public static class LiveHub
     public const string HostStatusChanged = "HostStatusChanged"; // HostDto
     public const string SummaryChanged = "SummaryChanged";     // DashboardSummaryDto (au plus 1 / 2 s)
     public const string SettingsChanged = "SettingsChanged";   // SentinelSettings
+    public const string NotificationPushed = "NotificationPushed"; // InAppNotificationDto
 }

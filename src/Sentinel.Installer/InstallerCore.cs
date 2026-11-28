@@ -57,7 +57,7 @@ public sealed record InstallOptions(
 /// </summary>
 public static class InstallerCore
 {
-    public const string ProductVersion = "2.1.0";
+    public const string ProductVersion = "2.2.0";
     public const string NativeHostName = "com.sentinel.browserhost";
     public const string EmbeddedPayloadResourceName = "Sentinel.Installer.payload.zip";
 

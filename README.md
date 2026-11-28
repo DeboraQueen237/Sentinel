@@ -3,7 +3,7 @@
 **Agent léger de détection et de prévention des menaces (EDR) pour Windows — Défense en profondeur multi-moteurs, corrélation Markovienne et IA 100 % locale**
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0%20LTS-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
-[![Version](https://img.shields.io/badge/Version-2.0.0-10B981)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-2.2.0-10B981)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/Plateforme-Windows%2010%2F11%20x64-0078D6?logo=windows)](https://www.microsoft.com/windows)
 [![License: MIT](https://img.shields.io/badge/Licence-MIT-green.svg)](LICENSE)
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions)](.github/workflows/ci.yml)
@@ -26,8 +26,8 @@
 - **Fichiers canari anti-ransomware (M6)** : déploiement discret de fichiers leurres avec empreintes SHA-256 ; toute modification, renommage, chiffrement ou suppression déclenche immédiatement une réponse critique réversible.
 - **Visibilité scripts sans fournisseur AMSI managé (M7)** : PowerShell Script Block Logging Event ID `4104` + ETW `Microsoft-Antimalware-Scan-Interface` optionnel, métadonnées/hash/indicateurs par défaut (extrait tronqué avec caviardage automatique des secrets désactivé par défaut).
 - **Corrélation avancée & gouvernance (M8–M9)** : modèle de transitions de Markov, feedback VP/FP historisé et réversible, arêtes horodatées, récit chronologique, ventilation des contributions par moteur, verrouillage anti brute-force admin (HTTP 429), ACL NTFS restrictives (`SYSTEM` + `Administrateurs`), Watchdog avec détection de suppression de service.
-- **Console Blazor v2 bilingue FR/EN (M11)** : 13 écrans complets (nouveaux écrans `/intel`, `/rules`, `/ml`, `/canaries`, `/health`, graphe enrichi avec filtre tactique MITRE & récit chronologique), thème clair/sombre, zéro CDN.
-- **Installateur Windows x64 professionnel (M13)** : package **MSI WiX v5** (`SentinelSetup-2.0.0.msi`), archive portable (`SentinelPortable-2.0.0.zip`), assistant graphique avec consentement explicite et scripts `build/build.ps1` / `build/sign.ps1`.
+- **Console Blazor v2.2 bilingue FR/EN (M11 + v2.2)** : 14 écrans complets incluant l'**Arbre causal & Flux chronologique temps réel** (`/graph` avec distinction flux directs `──▶` vs indirects `- -▶` et déduplication `×N`), l'écran **Scan Système Général, Audit 11 points & Démo Live** (`/scan-audit`), les **diagnostics d'incident IA Qwen** à la demande, et les **notifications In-App (cloche temps réel) + SMS + WhatsApp + Email + Webhooks** chiffrées par DPAPI.
+- **Installateur Windows x64 professionnel (M13)** : package **MSI WiX v5** (`SentinelSetup-2.2.0.msi`), archive portable (`SentinelPortable-2.2.0.zip`), script de mise à niveau des services existants (`scripts/upgrade-installed-services.ps1`), assistant graphique avec consentement explicite et scripts `build/build.ps1` / `build/sign.ps1`.
 
 ---
 
@@ -80,9 +80,11 @@ dotnet run --project tests/Sentinel.Simulation -- --ollama --ollama-url http://l
 ```
 
 Les livrables sont produits dans `dist/` :
-- `dist/SentinelSetup-2.0.0.msi` (installateur Windows MSI WiX v5)
-- `dist/SentinelPortable-2.0.0.zip` (archive portable x64)
+- `dist/SentinelSetup-2.2.0.msi` (installateur Windows MSI WiX v5)
+- `dist/SentinelPortable-2.2.0.zip` (archive portable x64)
 - `dist/SHA256SUMS.txt` (empreintes SHA-256 vérifiables)
+
+> **Mise à niveau d'une installation existante (`v1.0.0` / `v2.0.0` → `v2.2.0`)** : exécutez `.\scripts\upgrade-installed-services.ps1` (invite UAC Administrateur) pour mettre à jour les binaires de `C:\Program Files\Sentinel\` et redémarrer proprement les 4 services Windows.
 
 ---
 
@@ -90,6 +92,8 @@ Les livrables sont produits dans `dist/` :
 
 | Document | Contenu |
 |---|---|
+| [docs/presentation-et-demo.md](docs/presentation-et-demo.md) | **Plan de soutenance chronométré (10–15 min), scénarios de démonstration live et tests jury** |
+| [docs/guide-utilisation-et-tests.md](docs/guide-utilisation-et-tests.md) | Guide complet d'utilisation, configuration notifications (In-App/SMS/WhatsApp/Email) et recette |
 | [docs/architecture.md](docs/architecture.md) | Architecture globale v2 (21 projets), diagrammes Mermaid, flux gRPC/IPC/SignalR, schéma BDD & disques |
 | [docs/detection-sources.md](docs/detection-sources.md) | Sources v2 : Defender, Sysmon, Sigma (table de mapping), YARA/PE, Threat Intel, ML PE, Canaris, PowerShell 4104 |
 | [docs/correlation-rules.md](docs/correlation-rules.md) | Graphe temporel, modèle de Markov, escalade au 2ᵉ événement, chaînes MITRE ATT&CK, feedback réversible |

@@ -433,21 +433,37 @@ else if (_settings is not null)
             </div>
         </section>
 
-        <!-- 5b. Notifications externes administrateur par niveau de criticité -->
+        <!-- 5b. Notifications administrateur par niveau de criticité (In-App + Email + SMS + WhatsApp + Webhook) -->
         <section class="card">
             <div class="card-header">
                 <div>
-                    <h2 class="card-title">Notifications administrateur par criticité (Email, WhatsApp, Webhook / Slack / Teams / Telegram)</h2>
-                    <p class="card-subtitle">Alertes automatiques sur alerte ou cluster corrélé selon le niveau minimal choisi · Strictement opt-in · Métadonnées uniquement · Secrets chiffrés DPAPI</p>
+                    <h2 class="card-title">Notifications administrateur par criticité (In-App, Email, SMS, WhatsApp, Slack / Teams / Telegram)</h2>
+                    <p class="card-subtitle">Centre In-App actif en temps réel par défaut · Canaux externes opt-in · Métadonnées uniquement · Secrets chiffrés DPAPI</p>
                 </div>
-                <button type="button" class="btn btn-sm" @onclick="RefreshNotifStatusAsync">Actualiser le statut</button>
+                <div class="row-wrap" style="gap:8px;">
+                    <button type="button" class="btn btn-sm btn-primary" @onclick='() => TestNotificationAsync("inapp")' disabled="@_testingChannel">
+                        🔔 Tester Notification App
+                    </button>
+                    <button type="button" class="btn btn-sm" @onclick="RefreshNotifStatusAsync">Actualiser</button>
+                </div>
             </div>
 
-            <div class="grid-2" style="margin-bottom:16px;">
+            <div class="grid-3" style="margin-bottom:16px;">
                 <div class="toggle-row">
                     <div>
-                        <div style="font-weight:600;">Activer les notifications externes administrateur</div>
-                        <div class="field-hint">Interrupteur maître. Désactivé par défaut pour confidentialité maximale.</div>
+                        <div style="font-weight:600;">Notifications temps réel dans l'application (Cloche + Son)</div>
+                        <div class="field-hint">Affiche immédiatement chaque alerte ou cluster corrélé dans la barre supérieure.</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" @bind="_settings.Notifications.EnableInApp" @bind:after="MarkDirty" />
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+
+                <div class="toggle-row">
+                    <div>
+                        <div style="font-weight:600;">Activer les canaux externes (Email, SMS, WhatsApp, Webhook)</div>
+                        <div class="field-hint">Interrupteur maître des envois hors console locale.</div>
                     </div>
                     <label class="switch">
                         <input type="checkbox" @bind="_settings.Notifications.Enabled" @bind:after="MarkDirty" />
@@ -554,6 +570,74 @@ else if (_settings is not null)
                         <StringListEditor Label="Destinataires Email administrateurs"
                                           Placeholder="soc-admin@entreprise.com"
                                           Items="_settings.Notifications.Email.Recipients"
+                                          OnChanged="MarkDirty" />
+                    </div>
+                </div>
+
+                <!-- SMS -->
+                <div class="card" style="background:rgba(15,23,42,0.45);padding:14px;">
+                    <div class="row-wrap" style="justify-content:space-between;margin-bottom:12px;">
+                        <div class="row-wrap" style="gap:10px;">
+                            <strong>SMS (Twilio SMS ou Passerelle HTTP / Opérateur)</strong>
+                            @if (_notifStatus?.Secrets.HasSmsToken == true)
+                            {
+                                <span class="badge badge-emerald">Jeton SMS DPAPI enregistré</span>
+                            }
+                        </div>
+                        <div class="row-wrap" style="gap:10px;">
+                            <button type="button" class="btn btn-sm" @onclick='() => TestNotificationAsync("sms")' disabled="@_testingChannel">
+                                Tester SMS
+                            </button>
+                            <label class="switch">
+                                <input type="checkbox" @bind="_settings.Notifications.Sms.Enabled" @bind:after="MarkDirty" />
+                                <span class="switch-track"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="grid-3">
+                        <div class="field">
+                            <label class="field-label">Criticité minimale</label>
+                            <select class="input" @bind="_settings.Notifications.Sms.MinLevel" @bind:after="MarkDirty">
+                                <option value="@ThreatLevel.Low">Faible (≥ 30)</option>
+                                <option value="@ThreatLevel.Moderate">Modéré (≥ 55)</option>
+                                <option value="@ThreatLevel.High">Élevé (≥ 75)</option>
+                                <option value="@ThreatLevel.Critical">Critique (≥ 90)</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label">Fournisseur SMS</label>
+                            <select class="input" @bind="_settings.Notifications.Sms.Provider" @bind:after="MarkDirty">
+                                <option value="TwilioSms">Twilio SMS</option>
+                                <option value="HttpGateway">Passerelle HTTP (Orange / Africa's Talking / OVH)</option>
+                            </select>
+                        </div>
+                        @if (string.Equals(_settings.Notifications.Sms.Provider, "HttpGateway", StringComparison.OrdinalIgnoreCase))
+                        {
+                            <div class="field">
+                                <label class="field-label">URL Passerelle SMS (HTTPS)</label>
+                                <input class="input mono" placeholder="https://sms-gateway.exemple.cm/send" @bind="_settings.Notifications.Sms.GatewayUrl" @bind:after="MarkDirty" />
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="field">
+                                <label class="field-label">Twilio Account SID</label>
+                                <input class="input mono" placeholder="ACxxxxxxxxxxxxxxxx" @bind="_settings.Notifications.Sms.AccountSid" @bind:after="MarkDirty" />
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Numéro expéditeur SMS</label>
+                                <input class="input mono" placeholder="+14155550100" @bind="_settings.Notifications.Sms.FromNumber" @bind:after="MarkDirty" />
+                            </div>
+                        }
+                        <div class="field">
+                            <label class="field-label">Clé API SMS / Auth Token (DPAPI)</label>
+                            <input type="password" class="input" placeholder="Laisser vide pour conserver l'actuel" @bind="_smsTokenInput" />
+                        </div>
+                    </div>
+                    <div style="margin-top:10px;">
+                        <StringListEditor Label="Numéros SMS administrateurs (E.164)"
+                                          Placeholder="+2376XXXXXXXX"
+                                          Items="_settings.Notifications.Sms.Recipients"
                                           OnChanged="MarkDirty" />
                     </div>
                 </div>
@@ -898,6 +982,7 @@ else if (_settings is not null)
     private string? _error;
 
     private string _smtpPasswordInput = string.Empty;
+    private string _smsTokenInput = string.Empty;
     private string _whatsAppTokenInput = string.Empty;
     private string _webhookSecretInput = string.Empty;
 
@@ -920,6 +1005,7 @@ else if (_settings is not null)
         {
             _settings = await Api.GetSettingsAsync();
             _settings.Notifications ??= new NotificationSettings();
+            _settings.Notifications.Sms ??= new SmsNotificationSettings();
             _dirty = false;
             try { _llmStatus = await Api.GetLlmStatusAsync(); } catch { /* optionnel */ }
             try { _notifStatus = await Api.GetNotificationStatusAsync(); } catch { /* optionnel */ }
@@ -961,10 +1047,11 @@ else if (_settings is not null)
     private async Task SaveNotificationSecretsAsync()
     {
         if (string.IsNullOrWhiteSpace(_smtpPasswordInput) &&
+            string.IsNullOrWhiteSpace(_smsTokenInput) &&
             string.IsNullOrWhiteSpace(_whatsAppTokenInput) &&
             string.IsNullOrWhiteSpace(_webhookSecretInput))
         {
-            Toasts.Warning("Aucun secret saisi", "Saisissez au moins un mot de passe SMTP, un jeton WhatsApp ou un secret Webhook.");
+            Toasts.Warning("Aucun secret saisi", "Saisissez au moins un mot de passe SMTP, une clé SMS, un jeton WhatsApp ou un secret Webhook.");
             return;
         }
 
@@ -974,9 +1061,10 @@ else if (_settings is not null)
             await Api.UpdateNotificationSecretsAsync(new NotificationSecretsRequest(
                 SmtpPassword: string.IsNullOrWhiteSpace(_smtpPasswordInput) ? null : _smtpPasswordInput,
                 WhatsAppAccessToken: string.IsNullOrWhiteSpace(_whatsAppTokenInput) ? null : _whatsAppTokenInput,
-                WebhookSecret: string.IsNullOrWhiteSpace(_webhookSecretInput) ? null : _webhookSecretInput));
+                WebhookSecret: string.IsNullOrWhiteSpace(_webhookSecretInput) ? null : _webhookSecretInput,
+                SmsApiToken: string.IsNullOrWhiteSpace(_smsTokenInput) ? null : _smsTokenInput));
 
-            _smtpPasswordInput = _whatsAppTokenInput = _webhookSecretInput = string.Empty;
+            _smtpPasswordInput = _smsTokenInput = _whatsAppTokenInput = _webhookSecretInput = string.Empty;
             await RefreshNotifStatusAsync();
             Toasts.Success("Secrets chiffrés (DPAPI)", "Les identifiants ont été enregistrés dans le coffre protégé local.");
         }

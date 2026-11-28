@@ -1,0 +1,312 @@
+@page "/scan-audit"
+@inject SentinelApiClient Api
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Scan Général, Audit &amp; Démo — SENTINEL</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Scan Système Général, Audit de Posture &amp; Démonstration Live</h1>
+        <p class="page-subtitle">Détection d'anomalies sur le poste (processus, réseau, persistance, fichiers, canaris), audit de sécurité en 11 points et simulateur de soutenance</p>
+    </div>
+    <div class="page-actions">
+        <button type="button" class="btn btn-primary" @onclick="RunScanAsync" disabled="@_scanning">
+            @(_scanning ? "Scan en cours…" : "🔍 Lancer un Scan Système Général")
+        </button>
+        <button type="button" class="btn btn-violet" @onclick="RunAuditAsync" disabled="@_auditing">
+            @(_auditing ? "Audit en cours…" : "🛡️ Exécuter l'Audit de Sécurité")
+        </button>
+    </div>
+</div>
+
+<!-- 1. Simulateur interactif de présentation / soutenance -->
+<section class="card" style="margin-bottom:18px;border-left:4px solid var(--accent-cyan);">
+    <div class="card-header">
+        <div>
+            <h2 class="card-title">🎬 Banc de Démonstration Temps Réel (Soutenance &amp; Tests)</h2>
+            <p class="card-subtitle">Injecte des scénarios de sécurité 100 % inoffensifs dans le moteur réel pour démontrer le Graphe causal en Arbre, le scoring IA Qwen, les Actions réversibles et les Notifications</p>
+        </div>
+        <button type="button" class="btn btn-sm btn-amber" @onclick='() => TriggerDemoAsync("clear-noise")' disabled="@_runningDemo">
+            🧹 Nettoyer le bruit historique (doublons)
+        </button>
+    </div>
+
+    <div class="grid-3">
+        <div class="card-elevated stack-sm">
+            <div class="row-wrap" style="justify-content:space-between;">
+                <strong>1. Chaîne Phishing → PowerShell → C2</strong>
+                <span class="badge sev-high">4 étapes</span>
+            </div>
+            <p class="text-secondary" style="margin:0;font-size:12px;">
+                Lien raccourci copié → téléchargement double extension → exécution PowerShell encodé → connexion sortante C2. Idéal pour démontrer l'<strong>Arbre Causal</strong> !
+            </p>
+            <button type="button" class="btn btn-sm btn-primary" @onclick='() => TriggerDemoAsync("phishing-chain")' disabled="@_runningDemo">
+                ▶ Lancer ce scénario
+            </button>
+        </div>
+
+        <div class="card-elevated stack-sm">
+            <div class="row-wrap" style="justify-content:space-between;">
+                <strong>2. Rançongiciel &amp; Fichier Canari</strong>
+                <span class="badge sev-critical">Critique</span>
+            </div>
+            <p class="text-secondary" style="margin:0;font-size:12px;">
+                Exécutable non signé → altération d'un fichier leurre Canari → chiffrement rapide → déclenchement automatique d'action réversible &amp; notifications critiques.
+            </p>
+            <button type="button" class="btn btn-sm btn-danger" @onclick='() => TriggerDemoAsync("ransomware-canary")' disabled="@_runningDemo">
+                ▶ Lancer ce scénario
+            </button>
+        </div>
+
+        <div class="card-elevated stack-sm">
+            <div class="row-wrap" style="justify-content:space-between;">
+                <strong>3. Intrusion BadUSB &amp; Persistance</strong>
+                <span class="badge sev-high">HID + Run</span>
+            </div>
+            <p class="text-secondary" style="margin:0;font-size:12px;">
+                Insertion USB HID composite → cadence de frappe surhumaine (68 touches/s, sans enregistrer le texte) → ajout d'une clé de démarrage Run.
+            </p>
+            <button type="button" class="btn btn-sm btn-violet" @onclick='() => TriggerDemoAsync("badusb-intrusion")' disabled="@_runningDemo">
+                ▶ Lancer ce scénario
+            </button>
+        </div>
+    </div>
+
+    @if (_lastDemo is not null)
+    {
+        <div class="explain-box" style="margin-top:14px;padding:12px;">
+            <div class="row-wrap" style="justify-content:space-between;">
+                <strong>@_lastDemo.Title (@_lastDemo.ElapsedMs.ToString("F0") ms)</strong>
+                <div class="row-wrap" style="gap:8px;">
+                    @if (_lastDemo.PrimaryClusterId.HasValue)
+                    {
+                        <a href="/graph/@_lastDemo.PrimaryClusterId.Value" class="btn btn-sm btn-violet">🌳 Voir l'Arbre Causal →</a>
+                    }
+                    @if (_lastDemo.PrimaryAlertId.HasValue)
+                    {
+                        <a href="/alerts/@_lastDemo.PrimaryAlertId.Value" class="btn btn-sm btn-primary">⚠️ Ouvrir l'Alerte &amp; IA →</a>
+                    }
+                </div>
+            </div>
+            <div class="text-secondary" style="font-size:12.5px;margin-top:4px;">@_lastDemo.Summary</div>
+        </div>
+    }
+</section>
+
+<!-- 2. Résultats du Scan Système Général -->
+<div class="grid-2" style="align-items:start;">
+    <section class="card">
+        <div class="card-header">
+            <div>
+                <h2 class="card-title">🔍 Scan Système Général des Anomalies</h2>
+                <p class="card-subtitle">Inspection à la demande et automatique (toutes les 6 h) des processus, connexions TCP, clés Run, fichiers récents et canaris</p>
+            </div>
+        </div>
+
+        @if (_scanning)
+        {
+            <SkeletonCards Count="3" />
+        }
+        else if (_scanReport is null)
+        {
+            <EmptyState Title="Aucun scan exécuté dans cette session"
+                        Subtitle="Cliquez sur « Lancer un Scan Système Général » pour inspecter votre machine en direct.">
+                <button type="button" class="btn btn-primary" style="margin-top:8px;" @onclick="RunScanAsync">Démarrer l'analyse</button>
+            </EmptyState>
+        }
+        else
+        {
+            <div class="kpi-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:14px;">
+                <div class="card-elevated" style="padding:10px 12px;">
+                    <div class="text-muted" style="font-size:11px;">Processus inspectés</div>
+                    <div class="mono" style="font-size:20px;font-weight:800;">@_scanReport.ProcessesInspected</div>
+                </div>
+                <div class="card-elevated" style="padding:10px 12px;">
+                    <div class="text-muted" style="font-size:11px;">Connexions &amp; Autoruns</div>
+                    <div class="mono" style="font-size:20px;font-weight:800;">@(_scanReport.ConnectionsInspected + _scanReport.PersistenceEntriesInspected)</div>
+                </div>
+                <div class="card-elevated" style="padding:10px 12px;">
+                    <div class="text-muted" style="font-size:11px;">Anomalies détectées</div>
+                    <div class="mono @(_scanReport.AnomaliesFound == 0 ? "text-emerald" : "text-amber")" style="font-size:20px;font-weight:800;">@_scanReport.AnomaliesFound</div>
+                </div>
+            </div>
+
+            <div class="mono text-muted" style="font-size:11.5px;margin-bottom:10px;">
+                Exécuté sur @_scanReport.HostName en @_scanReport.DurationMs.ToString("F0") ms (@_scanReport.FilesScanned binaires récents analysés YARA/PE, @_scanReport.CanariesChecked canaris vérifiés).
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_scanReport.AiExecutiveSummary))
+            {
+                <div class="explain-box" style="padding:12px;margin-bottom:12px;">
+                    <div class="field-label" style="margin-bottom:4px;">Synthèse IA / SOC</div>
+                    <div style="font-size:12.5px;line-height:1.5;">@_scanReport.AiExecutiveSummary</div>
+                </div>
+            }
+
+            @if (_scanReport.Findings.Count == 0)
+            {
+                <div class="badge badge-emerald" style="padding:8px 12px;">✓ Poste sain : aucun processus, flux réseau ou autorun suspect détecté</div>
+            }
+            else
+            {
+                <div class="stack-sm">
+                    @foreach (var f in _scanReport.Findings)
+                    {
+                        <div class="card-elevated stack-sm" style="padding:12px;">
+                            <div class="row-wrap" style="justify-content:space-between;">
+                                <span class="badge">@f.Area</span>
+                                <SeverityBadge Level="f.Severity" />
+                            </div>
+                            <strong>@f.Title</strong>
+                            <div class="mono text-cyan" style="font-size:11.5px;word-break:break-all;">@f.Subject</div>
+                            <div class="text-secondary" style="font-size:12px;">@f.Details</div>
+                            <div style="font-size:12px;"><strong>Action recommandée :</strong> @f.Recommendation</div>
+                        </div>
+                    }
+                </div>
+            }
+        }
+    </section>
+
+    <!-- 3. Résultats de l'Audit de Posture & Intégrité -->
+    <section class="card">
+        <div class="card-header">
+            <div>
+                <h2 class="card-title">🛡️ Audit de Sécurité &amp; Conformité Système</h2>
+                <p class="card-subtitle">Contrôle de posture en 11 points : Defender, Pare-feu, UAC, PowerShell 4104, Chaîne SHA-256, PKI mTLS, Sigma/YARA, ML, Qwen IA &amp; Alerting</p>
+            </div>
+        </div>
+
+        @if (_auditing)
+        {
+            <SkeletonCards Count="3" />
+        }
+        else if (_auditReport is null)
+        {
+            <EmptyState Title="Aucun audit de posture récent"
+                        Subtitle="Lancez l'Audit de Sécurité pour évaluer le niveau de durcissement et d'intégrité de votre installation.">
+                <button type="button" class="btn btn-violet" style="margin-top:8px;" @onclick="RunAuditAsync">Lancer l'Audit</button>
+            </EmptyState>
+        }
+        else
+        {
+            <div class="row-wrap" style="justify-content:space-between;margin-bottom:12px;">
+                <div>
+                    <div class="text-muted" style="font-size:12px;">Score global de posture défensive</div>
+                    <div class="mono @(_auditReport.PostureScore >= 80 ? "text-emerald" : "text-amber")" style="font-size:28px;font-weight:800;">
+                        @_auditReport.PostureScore / 100
+                    </div>
+                </div>
+                <div class="row-wrap" style="gap:6px;">
+                    <span class="badge badge-emerald">@_auditReport.PassedCount Conformes</span>
+                    <span class="badge badge-amber">@_auditReport.WarningCount Avertissements</span>
+                    @if (_auditReport.CriticalCount > 0)
+                    {
+                        <span class="badge badge-crimson">@_auditReport.CriticalCount Critiques</span>
+                    }
+                </div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_auditReport.AiActionPlan))
+            {
+                <div class="explain-box" style="padding:12px;margin-bottom:12px;white-space:pre-line;">
+                    <div class="field-label" style="margin-bottom:4px;">Plan d'action priorisé (IA / SOC)</div>
+                    <div style="font-size:12.5px;line-height:1.5;">@_auditReport.AiActionPlan</div>
+                </div>
+            }
+
+            <div class="stack-sm">
+                @foreach (var chk in _auditReport.Checks)
+                {
+                    var badgeCss = chk.Status switch
+                    {
+                        "Pass" => "badge-emerald",
+                        "Critical" => "badge-crimson",
+                        _ => "badge-amber"
+                    };
+                    <div class="card-elevated" style="padding:10px 12px;">
+                        <div class="row-wrap" style="justify-content:space-between;margin-bottom:4px;">
+                            <strong style="font-size:13px;">@chk.Title</strong>
+                            <span class="badge @badgeCss">@chk.Status</span>
+                        </div>
+                        <div class="text-secondary" style="font-size:12px;">@chk.CurrentState</div>
+                        @if (chk.Status != "Pass")
+                        {
+                            <div class="text-cyan" style="font-size:11.5px;margin-top:4px;">→ @chk.Recommendation</div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private SystemScanReportDto? _scanReport;
+    private SecurityAuditReportDto? _auditReport;
+    private DemoScenarioResultDto? _lastDemo;
+    private bool _scanning;
+    private bool _auditing;
+    private bool _runningDemo;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _scanReport = await Api.GetLastSystemScanAsync();
+        _auditReport = await Api.GetLastSystemSecurityAuditAsync();
+    }
+
+    private async Task RunScanAsync()
+    {
+        _scanning = true;
+        try
+        {
+            _scanReport = await Api.RunGeneralSystemScanAsync(ingestAnomalies: true, includeAiSummary: true);
+            Toasts.Success("Scan Système terminé", $"{_scanReport.ProcessesInspected} processus inspectés, {_scanReport.AnomaliesFound} anomalie(s) détectée(s).");
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Danger("Échec du scan système", ex.Message);
+        }
+        finally
+        {
+            _scanning = false;
+        }
+    }
+
+    private async Task RunAuditAsync()
+    {
+        _auditing = true;
+        try
+        {
+            _auditReport = await Api.RunSystemSecurityAuditAsync();
+            Toasts.Success("Audit de sécurité terminé", $"Score de posture : {_auditReport.PostureScore}/100.");
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Danger("Échec de l'audit", ex.Message);
+        }
+        finally
+        {
+            _auditing = false;
+        }
+    }
+
+    private async Task TriggerDemoAsync(string scenarioId)
+    {
+        _runningDemo = true;
+        try
+        {
+            _lastDemo = await Api.RunDemoScenarioAsync(scenarioId);
+            Toasts.Success("Scénario exécuté", _lastDemo.Summary);
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Danger("Erreur scénario démo", ex.Message);
+        }
+        finally
+        {
+            _runningDemo = false;
+        }
+    }
+}

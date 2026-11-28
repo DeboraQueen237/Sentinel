@@ -483,7 +483,8 @@ public sealed class ThreatPipeline : IThreatPipeline
             MaxOutputTokens = s.Llm.MaxOutputTokens,
             EnableResponseCache = s.Llm.EnableResponseCache,
             CacheTtlMinutes = s.Llm.CacheTtlMinutes,
-            WarmUpOnStartup = s.Llm.WarmUpOnStartup
+            WarmUpOnStartup = s.Llm.WarmUpOnStartup,
+            AutoAnalyzeHighAlerts = s.Llm.AutoAnalyzeHighAlerts
         },
         Correlation = new CorrelationSettings
         {
@@ -560,12 +561,16 @@ public sealed class ThreatPipeline : IThreatPipeline
     {
         n ??= new NotificationSettings();
         var email = n.Email ?? new EmailNotificationSettings();
+        var sms = n.Sms ?? new SmsNotificationSettings();
         var wa = n.WhatsApp ?? new WhatsAppNotificationSettings();
         var wh = n.Webhook ?? new WebhookNotificationSettings();
 
         return new NotificationSettings
         {
             Enabled = n.Enabled,
+            EnableInApp = n.EnableInApp,
+            InAppMinLevel = n.InAppMinLevel,
+            EnableSoundOnCritical = n.EnableSoundOnCritical,
             CooldownMinutes = n.CooldownMinutes,
             NotifyOnCorrelatedCluster = n.NotifyOnCorrelatedCluster,
             IncludeDashboardUrl = n.IncludeDashboardUrl,
@@ -581,6 +586,16 @@ public sealed class ThreatPipeline : IThreatPipeline
                 FromAddress = email.FromAddress,
                 FromName = email.FromName,
                 Recipients = new List<string>(email.Recipients ?? [])
+            },
+            Sms = new SmsNotificationSettings
+            {
+                Enabled = sms.Enabled,
+                MinLevel = sms.MinLevel,
+                Provider = sms.Provider,
+                AccountSid = sms.AccountSid,
+                FromNumber = sms.FromNumber,
+                GatewayUrl = sms.GatewayUrl,
+                Recipients = new List<string>(sms.Recipients ?? [])
             },
             WhatsApp = new WhatsAppNotificationSettings
             {

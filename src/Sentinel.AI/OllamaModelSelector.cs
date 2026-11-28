@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Win32;
 
 namespace Sentinel.AI;
 
@@ -23,11 +24,69 @@ public sealed record OllamaModelSelection(
 
 /// <summary>
 /// Sélectionne localement le meilleur modèle Qwen déjà installé dans Ollama en tenant compte
-/// de la génération Qwen, de la taille en paramètres, de la quantification et de la RAM disponible du poste.
+/// de la génération Qwen, de la taille en paramètres, de la présence d'un GPU dédié et de la RAM disponible du poste.
 /// Ne télécharge JAMAIS de modèle automatiquement (100 % hors ligne).
 /// </summary>
 public static partial class OllamaModelSelector
 {
+    private static readonly Lazy<bool> CachedDedicatedGpu = new(DetectDedicatedGpuSafe);
+
+    /// <summary>Détecte si le poste dispose d'un GPU dédié doté d'au moins 8 Go de VRAM permettant d'exécuter rapidement des modèles ≥ 7B–9B.</summary>
+    public static bool HasDedicatedGpu() => CachedDedicatedGpu.Value;
+
+    private static bool DetectDedicatedGpuSafe()
+    {
+        const long MinHighVramBytes = 8L * 1024 * 1024 * 1024; // 8 Gio VRAM dédiée requis pour 7B–9B fluide
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                using var displayClass = Registry.LocalMachine.OpenSubKey(
+                    @"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}");
+                if (displayClass is not null)
+                {
+                    foreach (var subName in displayClass.GetSubKeyNames())
+                    {
+                        if (!subName.StartsWith('0')) continue;
+                        using var adapter = displayClass.OpenSubKey(subName);
+                        if (adapter is null) continue;
+
+                        var desc = (adapter.GetValue("DriverDesc") as string) ?? string.Empty;
+                        var isDiscreteVendor =
+                            desc.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) ||
+                            desc.Contains("Radeon RX", StringComparison.OrdinalIgnoreCase) ||
+                            desc.Contains("Radeon PRO", StringComparison.OrdinalIgnoreCase) ||
+                            desc.Contains("Arc A", StringComparison.OrdinalIgnoreCase);
+
+                        if (!isDiscreteVendor) continue;
+
+                        long vramBytes = 0;
+                        var qwMem = adapter.GetValue("HardwareInformation.qwMemorySize");
+                        if (qwMem is long l)
+                        {
+                            vramBytes = l;
+                        }
+                        else if (qwMem is byte[] bytes && bytes.Length >= 8)
+                        {
+                            vramBytes = BitConverter.ToInt64(bytes, 0);
+                        }
+
+                        if (vramBytes >= MinHighVramBytes)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Lecture registre non critique
+        }
+
+        return false;
+    }
+
     /// <summary>Retourne la mémoire vive disponible sur la machine hôte en Gio.</summary>
     public static double GetHostRamGb()
     {
@@ -128,11 +187,13 @@ public static partial class OllamaModelSelector
         IReadOnlyList<OllamaInstalledModel> installed,
         string? configuredModel,
         bool autoSelectBestQwen,
-        double hostRamGb = 0)
+        double hostRamGb = 0,
+        bool? hasDedicatedGpu = null)
     {
         ArgumentNullException.ThrowIfNull(installed);
 
         var effectiveRamGb = hostRamGb > 0.5 ? Math.Round(hostRamGb, 1) : GetHostRamGb();
+        var effectiveGpu = hasDedicatedGpu ?? (hostRamGb > 0.5 ? true : HasDedicatedGpu());
         var chatCandidates = installed.Where(m => !IsEmbeddingModel(m)).ToList();
 
         if (chatCandidates.Count == 0)
@@ -162,8 +223,8 @@ public static partial class OllamaModelSelector
             }
 
             // Repli transparent vers le meilleur modèle Qwen ou local si le modèle configuré manque
-            var fallback = PickHighestRanked(chatCandidates, configuredModel, effectiveRamGb, qwenOnly: true)
-                           ?? PickHighestRanked(chatCandidates, configuredModel, effectiveRamGb, qwenOnly: false);
+            var fallback = PickHighestRanked(chatCandidates, configuredModel, effectiveRamGb, effectiveGpu, qwenOnly: true)
+                           ?? PickHighestRanked(chatCandidates, configuredModel, effectiveRamGb, effectiveGpu, qwenOnly: false);
 
             return new OllamaModelSelection(
                 SelectedModel: fallback!.Model.Name,
@@ -174,21 +235,22 @@ public static partial class OllamaModelSelector
                 Candidates: installed);
         }
 
-        // Mode auto-sélection Qwen (par défaut) : privilégie le meilleur Qwen adapté à la RAM du poste
-        var bestQwen = PickHighestRanked(chatCandidates, configuredModel, effectiveRamGb, qwenOnly: true);
+        // Mode auto-sélection Qwen (par défaut) : privilégie le meilleur Qwen adapté à la RAM et au CPU/GPU du poste
+        var bestQwen = PickHighestRanked(chatCandidates, configuredModel, effectiveRamGb, effectiveGpu, qwenOnly: true);
         if (bestQwen is not null)
         {
             var isDifferent = string.IsNullOrWhiteSpace(configuredModel) ||
                               !MatchesModelName(bestQwen.Model.Name, configuredModel);
             var prefix = isDifferent
                 ? $"Meilleur modèle Qwen local sélectionné automatiquement : {bestQwen.Model.Name}"
-                : $"Modèle Qwen optimal déjà actif : {bestQwen.Model.Name}";
+                : $"Modèle Qwen optimal actif : {bestQwen.Model.Name}";
+            var accelNote = effectiveGpu ? "GPU dédié" : "optimisé CPU";
             return new OllamaModelSelection(
                 SelectedModel: bestQwen.Model.Name,
                 AutoSelected: true,
                 IsQwen: true,
                 HostRamGb: effectiveRamGb,
-                Reason: $"{prefix} ({bestQwen.Summary}, RAM hôte {effectiveRamGb:F1} Go).",
+                Reason: $"{prefix} ({bestQwen.Summary}, {accelNote}, RAM {effectiveRamGb:F1} Go).",
                 Candidates: installed);
         }
 
@@ -205,7 +267,7 @@ public static partial class OllamaModelSelector
                 Candidates: installed);
         }
 
-        var bestLocal = PickHighestRanked(chatCandidates, configuredModel, effectiveRamGb, qwenOnly: false)!;
+        var bestLocal = PickHighestRanked(chatCandidates, configuredModel, effectiveRamGb, effectiveGpu, qwenOnly: false)!;
         return new OllamaModelSelection(
             SelectedModel: bestLocal.Model.Name,
             AutoSelected: true,
@@ -255,6 +317,7 @@ public static partial class OllamaModelSelector
         List<OllamaInstalledModel> candidates,
         string? configuredModel,
         double hostRamGb,
+        bool hasDedicatedGpu,
         bool qwenOnly)
     {
         var pool = qwenOnly ? candidates.Where(IsQwenModel).ToList() : candidates;
@@ -263,7 +326,7 @@ public static partial class OllamaModelSelector
         ScoredCandidate? best = null;
         foreach (var model in pool)
         {
-            var scored = ScoreCandidate(model, configuredModel, hostRamGb);
+            var scored = ScoreCandidate(model, configuredModel, hostRamGb, hasDedicatedGpu);
             if (best is null ||
                 scored.Score > best.Score ||
                 (Math.Abs(scored.Score - best.Score) < 0.001 &&
@@ -276,7 +339,11 @@ public static partial class OllamaModelSelector
         return best;
     }
 
-    private static ScoredCandidate ScoreCandidate(OllamaInstalledModel model, string? configuredModel, double hostRamGb)
+    private static ScoredCandidate ScoreCandidate(
+        OllamaInstalledModel model,
+        string? configuredModel,
+        double hostRamGb,
+        bool hasDedicatedGpu)
     {
         var lower = model.Name.ToLowerInvariant();
         var isQwen = IsQwenModel(model);
@@ -316,17 +383,33 @@ public static partial class OllamaModelSelector
             score += GetQwenGenerationScore(lower);
         }
 
-        // 3. Puissance paramétrique (plafonnée pour préserver la réactivité temps réel SOC)
-        score += paramB switch
+        // 3. Puissance paramétrique ajustée selon présence de GPU dédié ou exécution CPU seule
+        if (hasDedicatedGpu)
         {
-            <= 0.7 => 8,
-            <= 1.8 => 20,
-            <= 4.2 => 34,
-            <= 9.5 => 48,
-            <= 16.5 => 58,
-            <= 35.0 => 62,
-            _ => 52
-        };
+            score += paramB switch
+            {
+                <= 0.7 => 8,
+                <= 1.8 => 20,
+                <= 4.2 => 34,
+                <= 9.5 => 48,
+                <= 16.5 => 58,
+                <= 35.0 => 62,
+                _ => 52
+            };
+        }
+        else
+        {
+            // Sur CPU seul : les modèles 1.5B–4B (ex. qwen2.5-coder:3b) répondent 3x à 4x plus vite que les 7B–9B
+            score += paramB switch
+            {
+                <= 0.9 => 18,
+                <= 2.2 => 42,
+                <= 4.5 => 58,
+                <= 8.2 => 26,
+                <= 10.5 => 12,
+                _ => -20
+            };
+        }
 
         // 4. Spécialisation du variant (instruct & coder excellent sur JSON structuré + lignes de commande)
         if (lower.Contains("-vl", StringComparison.Ordinal) ||

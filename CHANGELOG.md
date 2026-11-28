@@ -4,7 +4,23 @@ Toutes les évolutions notables de **SENTINEL** sont consignées ici selon le fo
 
 ---
 
-## [2.1.0] — 2026-11-25 (`main` / `develop`)
+## [2.2.0] — 2026-11-27 (`main` / `develop`)
+
+### Ajouté
+- **Refonte complète du Graphe en Arbre Causal & Flux Temps Réel** (`GraphBuilderService`, `sentinel-graph.js`, `Graph.razor`) :
+  - Topologie hiérarchique claire de gauche à droite (`Racine Poste` → `Acteur Utilisateur/USB` → `Processus Parent/Enfant` → `Événement dédupliqué ×N` → `Cible Fichier/Domaine/IP` → `Menace/Alerte`), éliminant l'effet « nid d'abeilles rouge ».
+  - Distinction visuelle nette entre **flux causaux directs (`──▶`)** et **corrélations indirectes (`- -▶`)**, traçage complet de branche au clic, recherche instantanée, masquage du bruit système et vue **Flux chronologique temps réel**.
+- **Scan Système Général, Audit de Posture en 11 points & Banc de Démo Soutenance** (`SystemScanAndAuditService`, `/scan-audit`) :
+  - Scan proactif à la demande et planifié (toutes les 6 h) des processus actifs, connexions TCP, clés `Run`/`RunOnce`, binaires récents (YARA + PeNet + ML PE) et canaris.
+  - Audit de sécurité et conformité (`PostureScore /100` : Defender, Pare-feu, UAC, PowerShell 4104, Sysmon, chaîne cryptographique SHA-256, PKI mTLS, Sigma/YARA, ML, Qwen IA).
+  - Simulateur temps réel de soutenance (`phishing-chain`, `ransomware-canary`, `badusb-intrusion`, `clear-noise`) + guide [docs/presentation-et-demo.md](docs/presentation-et-demo.md).
+- **Notifications temps réel In-App (Cloche + Son) & Canal SMS** (`AlertNotificationService`, `MainLayout.razor`, `Settings.razor`) :
+  - Centre de notifications temps réel dans la barre supérieure (actif par défaut via SignalR) et support **SMS** (`TwilioSms` + `HttpGateway` compatible passerelles opérateurs locales/régionales, secrets chiffrés DPAPI).
+- **Intervention IA Qwen à 3 niveaux & Sélection CPU/GPU intelligente** (`OllamaModelSelector`, `OllamaAssessor`, `AlertDetail.razor`) :
+  - Détection GPU dédié vs CPU seul : privilégie automatiquement `qwen2.5-coder:3b` sur CPU pour une réponse rapide, migration automatique des anciennes bases `v1.0.0`, et bouton **« ✨ Diagnostic & Plan d'Action IA (Qwen) »** sur chaque alerte et cluster.
+
+### Corrigé
+- **Auto-réparation de `SqliteEventOutbox` & Anti-tempête `WatchdogWorker`** : corrige l'erreur `SQLite Error 10: disk I/O error` qui provoquait l'arrêt répété de `SentinelAgent` et la génération en boucle d'alertes `AgentTampering` toutes les 10 s (cooldown 15 min + backoff exponentiel + déduplication serveur et bouton de nettoyage en 1 clic).
 
 ### Ajouté
 - **Notifications administrateur automatiques multi-canaux par niveau de criticité** (`Sentinel.Server`, `Sentinel.Shared`, `Sentinel.Admin`) :

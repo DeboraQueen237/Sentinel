@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
+using Sentinel.AI;
 using Sentinel.Core.Abstractions;
 using Sentinel.Shared.Infrastructure;
 using Sentinel.Shared.Json;
@@ -24,6 +25,7 @@ public sealed class StartupInitializationService : IHostedService
     private readonly SentinelDbInitializer _dbInitializer;
     private readonly IDbContextFactory<SentinelDbContext> _dbFactory;
     private readonly IThreatPipeline _pipeline;
+    private readonly ILlmAssessor _llm;
     private readonly IAlertNotificationDispatcher _notifications;
     private readonly IHostEnvironment _environment;
     private readonly ILogger<StartupInitializationService> _logger;
@@ -32,6 +34,7 @@ public sealed class StartupInitializationService : IHostedService
         SentinelDbInitializer dbInitializer,
         IDbContextFactory<SentinelDbContext> dbFactory,
         IThreatPipeline pipeline,
+        ILlmAssessor llm,
         IAlertNotificationDispatcher notifications,
         IHostEnvironment environment,
         ILogger<StartupInitializationService> logger)
@@ -39,6 +42,7 @@ public sealed class StartupInitializationService : IHostedService
         _dbInitializer = dbInitializer;
         _dbFactory = dbFactory;
         _pipeline = pipeline;
+        _llm = llm;
         _notifications = notifications;
         _environment = environment;
         _logger = logger;
@@ -83,10 +87,51 @@ public sealed class StartupInitializationService : IHostedService
         else
         {
             settings = SentinelJson.Deserialize<SentinelSettings>(settingsEntity.SettingsJson) ?? new SentinelSettings();
+            settings.Notifications ??= new NotificationSettings();
+            settings.Notifications.Sms ??= new SmsNotificationSettings();
+
+            // Migration douce depuis une base v1.0.0 où TimeoutSeconds=10 et Model="qwen2.5:7b" empêchaient Ollama CPU de répondre
+            var migrated = false;
+            if (settings.Llm.TimeoutSeconds < 30)
+            {
+                settings.Llm.TimeoutSeconds = 45;
+                migrated = true;
+            }
+            if (string.Equals(settings.Llm.Model, "qwen2.5:7b", StringComparison.OrdinalIgnoreCase))
+            {
+                settings.Llm.Model = "qwen2.5-coder:3b";
+                settings.Llm.AutoSelectBestQwen = true;
+                migrated = true;
+            }
+            if (migrated)
+            {
+                settingsEntity.Version++;
+                settingsEntity.SettingsJson = SentinelJson.Serialize(settings);
+                settingsEntity.UpdatedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("Paramètres LLM migrés automatiquement vers v2.2 (modèle={Model}, timeout={Timeout}s).",
+                    settings.Llm.Model, settings.Llm.TimeoutSeconds);
+            }
         }
 
         _pipeline.UpdateSettings(settings);
         _notifications.UpdateSettings(settings.Notifications ?? new NotificationSettings());
+
+        if (!_environment.IsEnvironment("Testing") && settings.Llm.Enabled)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var sel = await _llm.RefreshModelSelectionAsync(CancellationToken.None).ConfigureAwait(false);
+                    if (!string.IsNullOrWhiteSpace(sel.SelectedModel) && settings.Llm.WarmUpOnStartup)
+                    {
+                        await _llm.WarmUpAsync(CancellationToken.None).ConfigureAwait(false);
+                    }
+                }
+                catch { /* non bloquant */ }
+            }, CancellationToken.None);
+        }
 
         // 3. Restauration de la baseline comportementale
         var snapshot = await db.BaselineSnapshots

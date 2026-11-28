@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using Sentinel.Server.Hubs;
 using Sentinel.Shared.Api;
 using Sentinel.Shared.Json;
 using Sentinel.Shared.Models;
@@ -23,6 +24,8 @@ public interface IAlertNotificationDispatcher
     void EnqueueCluster(ClusterDto cluster);
     Task<NotificationDeliveryDto> SendTestAsync(string channel, CancellationToken ct = default);
     NotificationStatusDto GetStatus();
+    IReadOnlyList<InAppNotificationDto> GetInbox();
+    int MarkAllRead();
     Task DrainAsync(CancellationToken ct = default);
 }
 
@@ -96,15 +99,20 @@ public sealed class SystemSmtpMailTransport : ISmtpMailTransport
 }
 
 /// <summary>
-/// Service d'arrière-plan gérant les notifications administrateur multi-canaux (Email SMTP, WhatsApp Meta Cloud / Twilio,
-/// Webhook / Slack / Teams / Discord / Telegram) routées selon le niveau de criticité d'une alerte ou d'un cluster corrélé.
-/// Strictement opt-in, non bloquant (<see cref="Channel{T}"/>), avec anti-spam contourné sur escalade, retries et audit chaîné.
+/// Service d'arrière-plan gérant les notifications administrateur multi-canaux :
+/// - Centre de notifications temps réel In-App (SignalR + cloche console, actif par défaut)
+/// - Email SMTP TLS/STARTTLS
+/// - SMS (Twilio SMS ou passerelle HTTP régionale/opérateur)
+/// - WhatsApp (Meta Cloud API v21.0 ou Twilio WhatsApp)
+/// - Webhook / Slack / Microsoft Teams / Discord / Telegram
+/// Strictement respectueux de la vie privée (métadonnées uniquement, secrets chiffrés DPAPI).
 /// </summary>
 public sealed class AlertNotificationService : BackgroundService, IAlertNotificationDispatcher
 {
     public const string HttpClientName = "SentinelNotifications";
     private const int MaxQueueCapacity = 256;
-    private const int MaxDeliveryHistory = 50;
+    private const int MaxDeliveryHistory = 60;
+    private const int MaxInAppInbox = 80;
 
     private sealed record NotificationEnvelope(
         string TriggerKind,
@@ -119,6 +127,7 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
         string? ChainName,
         int EventCount,
         string ReferenceId,
+        string? TargetUrl,
         DateTimeOffset Timestamp,
         bool ForceBypassCooldown);
 
@@ -128,6 +137,7 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
     private readonly ISmtpMailTransport _smtpTransport;
     private readonly NotificationSecretStore _secretStore;
     private readonly HashChainWriter? _auditWriter;
+    private readonly LiveBroadcaster? _broadcaster;
     private readonly TimeProvider _clock;
     private readonly ILogger<AlertNotificationService> _logger;
     private readonly TimeSpan[] _retryDelays;
@@ -136,6 +146,7 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
     private readonly object _stateGate = new();
     private readonly Dictionary<string, CooldownRecord> _cooldowns = new(StringComparer.OrdinalIgnoreCase);
     private readonly LinkedList<NotificationDeliveryDto> _history = new();
+    private readonly LinkedList<InAppNotificationDto> _inbox = new();
 
     private volatile NotificationSettings _settings = new();
     private int _pendingWorkCount;
@@ -149,6 +160,7 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
         NotificationSecretStore secretStore,
         ILogger<AlertNotificationService> logger,
         HashChainWriter? auditWriter = null,
+        LiveBroadcaster? broadcaster = null,
         TimeProvider? clock = null,
         TimeSpan[]? retryDelays = null)
     {
@@ -157,6 +169,7 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
         _secretStore = secretStore;
         _logger = logger;
         _auditWriter = auditWriter;
+        _broadcaster = broadcaster;
         _clock = clock ?? TimeProvider.System;
         _retryDelays = retryDelays ?? [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3)];
 
@@ -178,7 +191,7 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
     {
         ArgumentNullException.ThrowIfNull(alert);
         var cfg = _settings;
-        if (!cfg.Enabled || !HasAnyEnabledChannel(cfg)) return;
+        if (!cfg.EnableInApp && (!cfg.Enabled || !HasAnyEnabledExternalChannel(cfg))) return;
 
         var envelope = new NotificationEnvelope(
             TriggerKind: isEscalation ? "Alerte (Escalade)" : "Alerte",
@@ -193,6 +206,7 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
             ChainName: null,
             EventCount: alert.EventCount,
             ReferenceId: alert.ClusterId?.ToString("N") ?? alert.Id.ToString("N"),
+            TargetUrl: $"/alerts/{alert.Id}",
             Timestamp: alert.UpdatedAt,
             ForceBypassCooldown: isEscalation);
 
@@ -203,7 +217,8 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
     {
         ArgumentNullException.ThrowIfNull(cluster);
         var cfg = _settings;
-        if (!cfg.Enabled || !cfg.NotifyOnCorrelatedCluster || !HasAnyEnabledChannel(cfg)) return;
+        if (!cfg.NotifyOnCorrelatedCluster) return;
+        if (!cfg.EnableInApp && (!cfg.Enabled || !HasAnyEnabledExternalChannel(cfg))) return;
 
         var title = string.IsNullOrWhiteSpace(cluster.ChainName)
             ? $"Cluster corrélé ({cluster.EventCount} événements — {cluster.DominantType})"
@@ -222,6 +237,7 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
             ChainName: string.IsNullOrWhiteSpace(cluster.ChainName) ? null : Sanitize(cluster.ChainName, 80),
             EventCount: cluster.EventCount,
             ReferenceId: cluster.Id.ToString("N"),
+            TargetUrl: $"/graph/{cluster.Id}",
             Timestamp: cluster.LastSeen,
             ForceBypassCooldown: cluster.Escalated);
 
@@ -245,19 +261,47 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
             ChainName: null,
             EventCount: 1,
             ReferenceId: $"test-{Guid.NewGuid():N}",
+            TargetUrl: "/alerts",
             Timestamp: _clock.GetUtcNow(),
             ForceBypassCooldown: true);
 
         return await DispatchSingleChannelAsync(normalized, envelope, cfg, isTest: true, ct).ConfigureAwait(false);
     }
 
+    public IReadOnlyList<InAppNotificationDto> GetInbox()
+    {
+        lock (_stateGate)
+        {
+            return _inbox.ToArray();
+        }
+    }
+
+    public int MarkAllRead()
+    {
+        var updated = 0;
+        lock (_stateGate)
+        {
+            for (var node = _inbox.First; node is not null; node = node.Next)
+            {
+                if (!node.Value.IsRead)
+                {
+                    node.Value = node.Value with { IsRead = true };
+                    updated++;
+                }
+            }
+        }
+        return updated;
+    }
+
     public NotificationStatusDto GetStatus()
     {
         var cfg = _settings;
         NotificationDeliveryDto[] deliveries;
+        int unreadInApp;
         lock (_stateGate)
         {
             deliveries = _history.ToArray();
+            unreadInApp = _inbox.Count(n => !n.IsRead);
         }
 
         return new NotificationStatusDto(
@@ -277,7 +321,13 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
             TotalFailed: Interlocked.Read(ref _totalFailed),
             SuppressedByCooldown: Interlocked.Read(ref _suppressedByCooldown),
             Secrets: _secretStore.GetStatus(),
-            RecentDeliveries: deliveries);
+            RecentDeliveries: deliveries,
+            InAppEnabled: cfg.EnableInApp,
+            InAppMinLevel: cfg.InAppMinLevel,
+            UnreadInAppCount: unreadInApp,
+            SmsEnabled: cfg.Sms.Enabled,
+            SmsMinLevel: cfg.Sms.MinLevel,
+            SmsProvider: cfg.Sms.Provider);
     }
 
     public async Task DrainAsync(CancellationToken ct = default)
@@ -321,7 +371,6 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            // Arrêt normal du service
         }
     }
 
@@ -337,11 +386,24 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
     private async Task ProcessEnvelopeAsync(NotificationEnvelope env, CancellationToken ct)
     {
         var cfg = _settings;
+
+        // 1. Notification temps réel In-App (cloche console + SignalR) : active indépendamment des canaux externes !
+        if (cfg.EnableInApp && env.Level >= cfg.InAppMinLevel && _broadcaster is not null)
+        {
+            await TryPushInAppWithCooldownAsync(env, cfg, ct).ConfigureAwait(false);
+        }
+
+        // 2. Canaux externes opt-in (Email, SMS, WhatsApp, Webhook/Slack/Teams/Telegram)
         if (!cfg.Enabled) return;
 
         if (cfg.Email.Enabled && env.Level >= cfg.Email.MinLevel)
         {
             await TryDispatchWithCooldownAsync("email", env, cfg, ct).ConfigureAwait(false);
+        }
+
+        if (cfg.Sms.Enabled && env.Level >= cfg.Sms.MinLevel)
+        {
+            await TryDispatchWithCooldownAsync("sms", env, cfg, ct).ConfigureAwait(false);
         }
 
         if (cfg.WhatsApp.Enabled && env.Level >= cfg.WhatsApp.MinLevel)
@@ -353,6 +415,57 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
         {
             await TryDispatchWithCooldownAsync("webhook", env, cfg, ct).ConfigureAwait(false);
         }
+    }
+
+    private async Task TryPushInAppWithCooldownAsync(NotificationEnvelope env, NotificationSettings cfg, CancellationToken ct)
+    {
+        var cooldownKey = $"inapp|{env.HostId}|{env.ThreatType}|{env.ReferenceId}";
+        var now = _clock.GetUtcNow();
+        var cooldown = TimeSpan.FromMinutes(Math.Clamp(cfg.CooldownMinutes, 0, 1440));
+
+        lock (_stateGate)
+        {
+            if (cooldown > TimeSpan.Zero && _cooldowns.TryGetValue(cooldownKey, out var previous))
+            {
+                if ((now - previous.SentAt) < cooldown && env.Level <= previous.Level)
+                {
+                    return;
+                }
+            }
+            _cooldowns[cooldownKey] = new CooldownRecord(now, env.Level);
+        }
+
+        var item = StoreInAppItem(env, now);
+        if (_broadcaster is not null)
+        {
+            await _broadcaster.NotificationPushedAsync(item, ct).ConfigureAwait(false);
+        }
+    }
+
+    private InAppNotificationDto StoreInAppItem(NotificationEnvelope env, DateTimeOffset now)
+    {
+        var dto = new InAppNotificationDto(
+            Id: Guid.NewGuid(),
+            Timestamp: now,
+            Level: env.Level,
+            Score: env.Score,
+            TriggerKind: env.TriggerKind,
+            Title: env.Title,
+            Message: env.Summary,
+            HostId: env.HostId,
+            TargetUrl: env.TargetUrl,
+            IsRead: false);
+
+        lock (_stateGate)
+        {
+            _inbox.AddFirst(dto);
+            while (_inbox.Count > MaxInAppInbox)
+            {
+                _inbox.RemoveLast();
+            }
+        }
+
+        return dto;
     }
 
     private async Task TryDispatchWithCooldownAsync(
@@ -414,8 +527,20 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
             {
                 switch (channel)
                 {
+                    case "inapp":
+                    {
+                        var dto = StoreInAppItem(env, _clock.GetUtcNow());
+                        if (_broadcaster is not null)
+                        {
+                            await _broadcaster.NotificationPushedAsync(dto, ct).ConfigureAwait(false);
+                        }
+                        break;
+                    }
                     case "email":
                         await SendEmailAsync(cfg, secrets, env, ct).ConfigureAwait(false);
+                        break;
+                    case "sms":
+                        await SendSmsAsync(cfg, secrets, env, ct).ConfigureAwait(false);
                         break;
                     case "whatsapp":
                         await SendWhatsAppAsync(cfg, secrets, env, ct).ConfigureAwait(false);
@@ -492,6 +617,92 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
         await _smtpTransport.SendAsync(email, secrets.SmtpPassword, subject, plain, html, ct).ConfigureAwait(false);
     }
 
+    private async Task SendSmsAsync(
+        NotificationSettings cfg,
+        NotificationSecrets secrets,
+        NotificationEnvelope env,
+        CancellationToken ct)
+    {
+        var sms = cfg.Sms;
+        var recipients = sms.Recipients
+            .Select(r => r?.Trim())
+            .Where(r => !string.IsNullOrWhiteSpace(r))
+            .Select(r => r!)
+            .ToList();
+
+        if (recipients.Count == 0)
+            throw new InvalidOperationException("Aucun numéro destinataire SMS (format E.164 ex. +2376...) configuré.");
+
+        var token = !string.IsNullOrWhiteSpace(secrets.SmsApiToken)
+            ? secrets.SmsApiToken
+            : secrets.WhatsAppAccessToken;
+
+        if (string.IsNullOrWhiteSpace(token))
+            throw new InvalidOperationException("Jeton API SMS / Twilio Auth Token absent du coffre chiffré DPAPI.");
+
+        var smsBody = FormatConciseSmsText(env);
+        var client = _httpFactory.CreateClient(HttpClientName);
+
+        if (string.Equals(sms.Provider, "HttpGateway", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!IsAllowedWebhookUrl(sms.GatewayUrl))
+                throw new InvalidOperationException("URL de passerelle SMS invalide (HTTPS requis, ou http://127.0.0.1 en test local).");
+
+            foreach (var to in recipients)
+            {
+                var payload = new
+                {
+                    to,
+                    from = string.IsNullOrWhiteSpace(sms.FromNumber) ? "SENTINEL" : sms.FromNumber.Trim(),
+                    message = smsBody,
+                    level = env.Level.ToString(),
+                    score = env.Score
+                };
+
+                using var req = new HttpRequestMessage(HttpMethod.Post, sms.GatewayUrl.Trim())
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+                };
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+                using var resp = await client.SendAsync(req, ct).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var err = await ReadSafeErrorSnippetAsync(resp, ct).ConfigureAwait(false);
+                    throw new HttpRequestException($"Passerelle SMS HTTP {(int)resp.StatusCode} : {err}");
+                }
+            }
+        }
+        else
+        {
+            // Twilio SMS standard
+            if (string.IsNullOrWhiteSpace(sms.AccountSid) || string.IsNullOrWhiteSpace(sms.FromNumber))
+                throw new InvalidOperationException("AccountSid et FromNumber Twilio SMS sont requis.");
+
+            var endpoint = $"https://api.twilio.com/2010-04-01/Accounts/{Uri.EscapeDataString(sms.AccountSid.Trim())}/Messages.json";
+            var basicToken = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{sms.AccountSid.Trim()}:{token}"));
+
+            foreach (var to in recipients)
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Post, endpoint);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Basic", basicToken);
+                req.Content = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["From"] = sms.FromNumber.Trim(),
+                    ["To"] = to,
+                    ["Body"] = smsBody
+                });
+
+                using var resp = await client.SendAsync(req, ct).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var err = await ReadSafeErrorSnippetAsync(resp, ct).ConfigureAwait(false);
+                    throw new HttpRequestException($"Twilio SMS HTTP {(int)resp.StatusCode} : {err}");
+                }
+            }
+        }
+    }
+
     private async Task SendWhatsAppAsync(
         NotificationSettings cfg,
         NotificationSecrets secrets,
@@ -544,7 +755,6 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
         }
         else
         {
-            // Meta WhatsApp Business Cloud API (Graph API officielle)
             if (string.IsNullOrWhiteSpace(wa.PhoneNumberId))
                 throw new InvalidOperationException("PhoneNumberId Meta WhatsApp Cloud API requis.");
 
@@ -712,6 +922,13 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
                (uri.IsLoopback || uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase));
     }
 
+    private static string FormatConciseSmsText(NotificationEnvelope env)
+    {
+        var mitre = env.MitreTechniques.Count > 0 ? $" [{string.Join(",", env.MitreTechniques.Take(2))}]" : string.Empty;
+        var msg = $"[SENTINEL {LevelLabelFr(env.Level).ToUpperInvariant()} {env.Score}/100] {env.HostId} - {env.Title}{mitre}. {Sanitize(env.Summary, 110)}";
+        return msg.Length <= 280 ? msg : msg[..277] + "...";
+    }
+
     private static string FormatWhatsAppText(NotificationSettings cfg, NotificationEnvelope env)
     {
         var icon = env.Level switch
@@ -868,13 +1085,15 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
         foreach (var k in toRemove) _cooldowns.Remove(k);
     }
 
-    private static bool HasAnyEnabledChannel(NotificationSettings cfg) =>
-        cfg.Email.Enabled || cfg.WhatsApp.Enabled || cfg.Webhook.Enabled;
+    private static bool HasAnyEnabledExternalChannel(NotificationSettings cfg) =>
+        cfg.Email.Enabled || cfg.Sms.Enabled || cfg.WhatsApp.Enabled || cfg.Webhook.Enabled;
 
     private static string NormalizeChannelName(string? channel) =>
         (channel ?? string.Empty).Trim().ToLowerInvariant() switch
         {
+            "inapp" or "app" or "console" => "inapp",
             "email" or "smtp" or "mail" => "email",
+            "sms" => "sms",
             "whatsapp" or "wa" => "whatsapp",
             "webhook" or "slack" or "teams" or "discord" or "telegram" => "webhook",
             var other => other
@@ -933,6 +1152,8 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
             safe = safe.Replace(secrets.WhatsAppAccessToken, "[REDACTED]", StringComparison.Ordinal);
         if (!string.IsNullOrWhiteSpace(secrets.WebhookSecret))
             safe = safe.Replace(secrets.WebhookSecret, "[REDACTED]", StringComparison.Ordinal);
+        if (!string.IsNullOrWhiteSpace(secrets.SmsApiToken))
+            safe = safe.Replace(secrets.SmsApiToken, "[REDACTED]", StringComparison.Ordinal);
         return safe;
     }
 
@@ -952,6 +1173,9 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
     private static NotificationSettings Clone(NotificationSettings n) => new()
     {
         Enabled = n.Enabled,
+        EnableInApp = n.EnableInApp,
+        InAppMinLevel = n.InAppMinLevel,
+        EnableSoundOnCritical = n.EnableSoundOnCritical,
         CooldownMinutes = n.CooldownMinutes,
         NotifyOnCorrelatedCluster = n.NotifyOnCorrelatedCluster,
         IncludeDashboardUrl = n.IncludeDashboardUrl,
@@ -966,7 +1190,17 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
             Username = n.Email.Username,
             FromAddress = n.Email.FromAddress,
             FromName = n.Email.FromName,
-            Recipients = new List<string>(n.Email.Recipients)
+            Recipients = new List<string>(n.Email.Recipients ?? [])
+        },
+        Sms = new SmsNotificationSettings
+        {
+            Enabled = n.Sms?.Enabled ?? false,
+            MinLevel = n.Sms?.MinLevel ?? ThreatLevel.Critical,
+            Provider = n.Sms?.Provider ?? "TwilioSms",
+            AccountSid = n.Sms?.AccountSid ?? string.Empty,
+            FromNumber = n.Sms?.FromNumber ?? string.Empty,
+            GatewayUrl = n.Sms?.GatewayUrl ?? string.Empty,
+            Recipients = new List<string>(n.Sms?.Recipients ?? [])
         },
         WhatsApp = new WhatsAppNotificationSettings
         {
@@ -977,7 +1211,7 @@ public sealed class AlertNotificationService : BackgroundService, IAlertNotifica
             AccountSid = n.WhatsApp.AccountSid,
             FromNumber = n.WhatsApp.FromNumber,
             ApiVersion = n.WhatsApp.ApiVersion,
-            Recipients = new List<string>(n.WhatsApp.Recipients)
+            Recipients = new List<string>(n.WhatsApp.Recipients ?? [])
         },
         Webhook = new WebhookNotificationSettings
         {

@@ -13,14 +13,15 @@
 
 ---
 
-## 2. Les 13 écrans de la console v2
+## 2. Les 14 écrans de la console v2.2
 
 | Section | Écran | Route | Opérations principales |
 |---|---|---|---|
 | **Supervision** | Vue d'ensemble | `/` | Score global, alertes critiques, courbe 24 h / 7 j / 30 j, santé serveur & Ollama (`qwen2.5-coder:3b`) |
-| | Alertes | `/alerts` | Filtrage, détail explicable (MITRE, moteurs, événements), **Approuver / Rejeter (faux positif réversible) / Acquitter / Résoudre** |
-| | Graphe de corrélation | `/graph` | Graphe interactif Cytoscape.js, **filtre par tactique MITRE ATT&CK**, récit chronologique du cluster, ventilation des scores par moteur, **bouton Annuler l'action en 1 clic** |
-| **Investigation** | Fiches Postes & Entités | `/entities` | Profils postes, utilisateurs, domaines, processus, fichiers, IP *(chaque consultation est journalisée dans l'Audit)* |
+| | Alertes | `/alerts` | Recherche instantanée, filtres rapides, nettoyage des rafales redondantes en 1 clic, **Diagnostic & Plan d'Action IA Qwen**, **Approuver / Rejeter / Acquitter / Résoudre** |
+| | Arbre & Graphe causal | `/graph` | **Arbre causal hiérarchique (`Racines → Branches → Nœuds → Menaces`)**, distinction **flux directs (`──▶`) vs indirects (`- -▶`)**, déduplication `(×N)`, **vue Flux chronologique temps réel**, diagnostic IA du cluster |
+| **Investigation** | Scan, Audit & Démo | `/scan-audit` | **Scan Système Général** (processus, réseau TCP, registre Run/RunOnce, PE/YARA/ML, canaris), **Audit de Sécurité 11 points** (score 0–100 + synthèse IA), **Simulateur de Démonstration Live** |
+| | Fiches Postes & Entités | `/entities` | Profils postes, utilisateurs, domaines, processus, fichiers, IP *(chaque consultation est journalisée dans l'Audit)* |
 | | Actions & blocages | `/actions` | Tickets d'action (`Proposed` → approuver/rejeter, `Executed` → **Annuler en 1 clic**), blocages manuels |
 | **Détection v2** | Renseignement | `/intel` | État des flux (abuse.ch, OpenPhish/PhishTank opt-in), nombre d'indicateurs, **rafraîchissement manuel**, recherche instantanée IOC (hash/domaine/URL/IP) via Bloom+SQLite |
 | | Règles & Scan | `/rules` | Liste des règles **Sigma** et **YARA**, activation/désactivation à chaud, rechargement, **scan statique à la demande** (YARA + PeNet + ML PE) |
@@ -28,7 +29,7 @@
 | | Canaris | `/canaries` | Inventaire des fichiers leurres anti-ransomware, statut SHA-256, bouton **Vérifier / Redéployer** |
 | | Santé agents | `/health` | CPU %, RAM, file d'attente, **statut Microsoft Defender (Temps réel ON/OFF)**, **présence de Sysmon (optionnel)**, état de chaque collecteur |
 | **Gouvernance** | Rapports & Évaluation | `/reports` | Export PDF (QuestPDF) / JSON et tableau comparatif A vs B vs C |
-| | Paramètres | `/settings` | Mode (`Learning` / `Simulation` / `Active`), seuils 0–4, dossiers surveillés, exclusions, interrupteurs v2 (Defender, Sysmon, Canaris, PowerShell 4104, extrait opt-in, Sigma/YARA/ML), modèle Ollama, rétention |
+| | Paramètres | `/settings` | Mode (`Learning` / `Simulation` / `Active`), seuils 0–4, dossiers surveillés, exclusions, interrupteurs v2, **notifications In-App + SMS + Email + WhatsApp + Webhook**, modèle Ollama Qwen, rétention |
 | | Audit & Intégrité | `/audit` | Journal chaîné SHA-256 + bouton **Vérifier l'intégrité cryptographique** (`GET /api/audit/verify`) |
 
 ---

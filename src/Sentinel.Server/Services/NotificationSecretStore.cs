@@ -12,7 +12,8 @@ namespace Sentinel.Server.Services;
 public sealed record NotificationSecrets(
     string? SmtpPassword = null,
     string? WhatsAppAccessToken = null,
-    string? WebhookSecret = null);
+    string? WebhookSecret = null,
+    string? SmsApiToken = null);
 
 /// <summary>
 /// Stockage chiffré au repos des identifiants de notification (DPAPI Windows dans <see cref="SentinelPaths.NotificationSecretsFile"/>,
@@ -43,12 +44,12 @@ public sealed class NotificationSecretStore
         {
             var fileSecrets = ReadFromProtectedFile();
 
-            // Repli sur dotnet user-secrets / variables d'environnement si absent du coffre DPAPI
             var smtp = FirstNonEmpty(fileSecrets.SmtpPassword, _configuration["Notifications:SmtpPassword"]);
             var wa = FirstNonEmpty(fileSecrets.WhatsAppAccessToken, _configuration["Notifications:WhatsAppAccessToken"]);
             var wh = FirstNonEmpty(fileSecrets.WebhookSecret, _configuration["Notifications:WebhookSecret"]);
+            var sms = FirstNonEmpty(fileSecrets.SmsApiToken, _configuration["Notifications:SmsApiToken"]);
 
-            return new NotificationSecrets(smtp, wa, wh);
+            return new NotificationSecrets(smtp, wa, wh, sms);
         }
     }
 
@@ -72,7 +73,11 @@ public sealed class NotificationSecretStore
                 ? null
                 : (!string.IsNullOrWhiteSpace(request.WebhookSecret) ? request.WebhookSecret.Trim() : current.WebhookSecret);
 
-            var updated = new NotificationSecrets(nextSmtp, nextWa, nextWh);
+            var nextSms = request.ClearSmsToken
+                ? null
+                : (!string.IsNullOrWhiteSpace(request.SmsApiToken) ? request.SmsApiToken.Trim() : current.SmsApiToken);
+
+            var updated = new NotificationSecrets(nextSmtp, nextWa, nextWh, nextSms);
             WriteToProtectedFile(updated);
             return BuildStatus(Load());
         }
@@ -140,7 +145,8 @@ public sealed class NotificationSecretStore
         HasSmtpPassword: !string.IsNullOrWhiteSpace(s.SmtpPassword),
         HasWhatsAppToken: !string.IsNullOrWhiteSpace(s.WhatsAppAccessToken),
         HasWebhookSecret: !string.IsNullOrWhiteSpace(s.WebhookSecret),
-        StorageMode: OperatingSystem.IsWindows() ? "DPAPI (LocalMachine) + UserSecrets" : "UserSecrets");
+        StorageMode: OperatingSystem.IsWindows() ? "DPAPI (LocalMachine) + UserSecrets" : "UserSecrets",
+        HasSmsToken: !string.IsNullOrWhiteSpace(s.SmsApiToken));
 
     private static string? FirstNonEmpty(params string?[] candidates) =>
         candidates.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c))?.Trim();

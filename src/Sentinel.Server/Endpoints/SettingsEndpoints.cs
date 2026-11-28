@@ -50,6 +50,7 @@ internal static class SettingsEndpoints
 
             settings.Notifications ??= new NotificationSettings();
             settings.Notifications.Email ??= new EmailNotificationSettings();
+            settings.Notifications.Sms ??= new SmsNotificationSettings();
             settings.Notifications.WhatsApp ??= new WhatsAppNotificationSettings();
             settings.Notifications.Webhook ??= new WebhookNotificationSettings();
 

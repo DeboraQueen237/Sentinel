@@ -71,15 +71,56 @@ else if (_detail is not null)
             <div class="explain-box">
                 <div class="row-wrap" style="justify-content:space-between;margin-bottom:8px;">
                     <h2 class="card-title">Explicabilité — Justification IA &amp; Règles</h2>
-                    @if (_detail.Events.Count > 0)
-                    {
-                        var primary = _detail.Events.OrderByDescending(e => e.Score).First();
-                        <span class="badge" style="background:var(--accent-violet-soft);color:var(--accent-violet);">
-                            @UiFormatters.AssessmentSourceLabel(primary.Source) • Confiance @((primary.Confidence * 100).ToString("0")) %
-                        </span>
-                    }
+                    <div class="row-wrap" style="gap:8px;">
+                        @if (_detail.Events.Count > 0)
+                        {
+                            var primary = _detail.Events.OrderByDescending(e => e.Score).First();
+                            <span class="badge" style="background:var(--accent-violet-soft);color:var(--accent-violet);">
+                                @UiFormatters.AssessmentSourceLabel(primary.Source) • Confiance @((primary.Confidence * 100).ToString("0")) %
+                            </span>
+                        }
+                        <button type="button" class="btn btn-sm btn-primary" @onclick="RunAiAnalysisAsync" disabled="@_analyzingAi">
+                            @(_analyzingAi ? "Analyse Qwen en cours…" : "✨ Diagnostic & Plan d'Action IA (Qwen)")
+                        </button>
+                    </div>
                 </div>
                 <p style="margin:0;white-space:pre-line;line-height:1.6;">@_detail.Justification</p>
+
+                @if (_aiAnalysis is not null)
+                {
+                    <div class="card-elevated" style="margin-top:14px;border-left:3px solid var(--accent-cyan);">
+                        <div class="row-wrap" style="justify-content:space-between;margin-bottom:6px;">
+                            <strong style="color:var(--accent-cyan);">
+                                @(_aiAnalysis.AiUsed ? $"Analyse IA locale ({_aiAnalysis.ModelUsed})" : _aiAnalysis.ModelUsed)
+                            </strong>
+                            <span class="mono text-muted" style="font-size:11.5px;">Confiance @((_aiAnalysis.Confidence * 100).ToString("0")) % · @_aiAnalysis.LatencyMs.ToString("F0") ms</span>
+                        </div>
+                        <p style="margin:0 0 8px;font-size:13px;line-height:1.5;">@_aiAnalysis.ExecutiveSummary</p>
+                        <div style="font-size:12.5px;color:var(--text-secondary);margin-bottom:8px;">
+                            <strong>Hypothèse de cause racine :</strong> @_aiAnalysis.RootCauseHypothesis
+                        </div>
+                        <div class="grid-2" style="gap:12px;">
+                            <div>
+                                <div class="field-label" style="margin-bottom:4px;">Actions immédiates recommandées</div>
+                                <ul style="margin:0;padding-left:18px;font-size:12px;line-height:1.5;">
+                                    @foreach (var step in _aiAnalysis.ImmediateActions)
+                                    {
+                                        <li>@step</li>
+                                    }
+                                </ul>
+                            </div>
+                            <div>
+                                <div class="field-label" style="margin-bottom:4px;">Durcissement préventif</div>
+                                <ul style="margin:0;padding-left:18px;font-size:12px;line-height:1.5;">
+                                    @foreach (var step in _aiAnalysis.HardeningSteps)
+                                    {
+                                        <li>@step</li>
+                                    }
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                }
 
                 @if (_detail.Cluster is { } cluster)
                 {
@@ -306,11 +347,13 @@ else if (_detail is not null)
     [Parameter] public Guid Id { get; set; }
 
     private AlertDetailDto? _detail;
+    private AiIncidentAnalysisDto? _aiAnalysis;
     private readonly HashSet<Guid> _expandedEvents = new();
     private string _comment = string.Empty;
     private bool _loading = true;
     private bool _acting;
     private bool _exporting;
+    private bool _analyzingAi;
     private string? _error;
 
     protected override async Task OnInitializedAsync()
@@ -443,6 +486,24 @@ else if (_detail is not null)
         finally
         {
             _exporting = false;
+        }
+    }
+
+    private async Task RunAiAnalysisAsync()
+    {
+        _analyzingAi = true;
+        try
+        {
+            _aiAnalysis = await Api.AnalyzeAlertWithAiAsync(Id);
+            Toasts.Success("Diagnostic IA prêt", $"Analyse générée via {_aiAnalysis.ModelUsed}.");
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Danger("Analyse IA impossible", ex.Message);
+        }
+        finally
+        {
+            _analyzingAi = false;
         }
     }
 

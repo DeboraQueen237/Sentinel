@@ -1,6 +1,7 @@
 @page "/alerts"
 @inject SentinelApiClient Api
 @inject LiveHubClient Hub
+@inject ToastService Toasts
 @inject NavigationManager Nav
 @implements IDisposable
 
@@ -12,20 +13,31 @@
         <p class="page-subtitle">Liste filtrable des détections individuelles et corrélées, mappées MITRE ATT&amp;CK</p>
     </div>
     <div class="page-actions">
-        <button type="button" class="btn" @onclick="ResetFiltersAsync">Réinitialiser les filtres</button>
+        <button type="button" class="btn btn-amber" @onclick="PurgeDuplicatesAsync" disabled="@_purging" title="Archive les alertes redondantes en doublon (ex. rafales AgentTampering)">
+            @(_purging ? "Nettoyage…" : "🧹 Dédupliquer les alertes")
+        </button>
+        <button type="button" class="btn" @onclick="ResetFiltersAsync">Réinitialiser</button>
         <button type="button" class="btn btn-primary" @onclick="LoadAsync" disabled="@_loading">
             @(_loading ? "Chargement…" : "Actualiser")
         </button>
     </div>
 </div>
 
+<!-- Filtres rapides 1 clic -->
+<div class="row-wrap" style="gap:8px;margin-bottom:12px;">
+    <button type="button" class="btn btn-sm @(string.IsNullOrEmpty(_quickPreset) ? "btn-primary" : "")" @onclick='() => ApplyQuickPresetAsync("")'>Toutes (@(_result?.Total ?? 0))</button>
+    <button type="button" class="btn btn-sm @(_quickPreset == "open-crit" ? "btn-danger" : "")" @onclick='() => ApplyQuickPresetAsync("open-crit")'>Critiques ouvertes</button>
+    <button type="button" class="btn btn-sm @(_quickPreset == "open-high" ? "btn-amber" : "")" @onclick='() => ApplyQuickPresetAsync("open-high")'>Élevées ouvertes</button>
+    <button type="button" class="btn btn-sm @(_quickPreset == "no-tamper" ? "btn-violet" : "")" @onclick='() => ApplyQuickPresetAsync("no-tamper")'>Hors bruit Watchdog</button>
+</div>
+
 <ErrorBanner Message="@_error" OnRetry="LoadAsync" />
 
 <div class="filter-bar">
     <div class="field search-field">
-        <label class="field-label">Recherche</label>
-        <input class="input" placeholder="Titre, résumé, domaine, utilisateur…"
-               @bind="_search" @bind:event="oninput" @onkeydown="OnSearchKeyDown" />
+        <label class="field-label">Recherche instantanée</label>
+        <input class="input" placeholder="Titre, résumé, domaine, poste, utilisateur, MITRE…"
+               @bind="_search" @bind:event="oninput" @bind:after="ApplyFiltersAsync" />
     </div>
 
     <div class="field">
@@ -115,7 +127,7 @@ else
                 </tr>
             </thead>
             <tbody>
-                @foreach (var alert in _result.Items)
+                @foreach (var alert in FilteredClientItems)
                 {
                     <tr class="clickable" @onclick='() => Nav.NavigateTo($"/alerts/{alert.Id}")'>
                         <td><ScoreBar Score="alert.Score" /></td>
@@ -173,9 +185,18 @@ else
     private string _typeFilter = string.Empty;
     private string _hostFilter = string.Empty;
     private string _windowFilter = "all";
+    private string _quickPreset = string.Empty;
     private int _page = 1;
     private bool _loading = true;
+    private bool _purging;
     private string? _error;
+
+    private IEnumerable<AlertDto> FilteredClientItems =>
+        _result is null
+            ? Enumerable.Empty<AlertDto>()
+            : (_quickPreset == "no-tamper"
+                ? _result.Items.Where(a => a.ThreatType != ThreatType.Tampering)
+                : _result.Items);
 
     protected override async Task OnInitializedAsync()
     {
@@ -245,8 +266,54 @@ else
         _typeFilter = string.Empty;
         _hostFilter = string.Empty;
         _windowFilter = "all";
+        _quickPreset = string.Empty;
         _page = 1;
         return LoadAsync();
+    }
+
+    private Task ApplyQuickPresetAsync(string preset)
+    {
+        _quickPreset = preset;
+        switch (preset)
+        {
+            case "open-crit":
+                _statusFilter = nameof(AlertStatus.Open);
+                _levelFilter = nameof(ThreatLevel.Critical);
+                break;
+            case "open-high":
+                _statusFilter = nameof(AlertStatus.Open);
+                _levelFilter = nameof(ThreatLevel.High);
+                break;
+            case "no-tamper":
+                _statusFilter = string.Empty;
+                _levelFilter = string.Empty;
+                break;
+            default:
+                _statusFilter = string.Empty;
+                _levelFilter = string.Empty;
+                break;
+        }
+        _page = 1;
+        return LoadAsync();
+    }
+
+    private async Task PurgeDuplicatesAsync()
+    {
+        _purging = true;
+        try
+        {
+            var res = await Api.PurgeDuplicateAlertsAsync();
+            Toasts.Success("Alertes dédupliquées", $"{res.AlertsResolved} doublon(s) archivé(s) ({res.RemainingOpenAlerts} alerte(s) distincte(s) ouverte(s)).");
+            await LoadAsync();
+        }
+        catch (SentinelApiException ex)
+        {
+            Toasts.Danger("Échec du nettoyage", ex.Message);
+        }
+        finally
+        {
+            _purging = false;
+        }
     }
 
     private Task ChangePageAsync(int nextPage)

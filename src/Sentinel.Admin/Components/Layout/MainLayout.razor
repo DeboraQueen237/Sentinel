@@ -5,6 +5,7 @@
 @inject ThemeService Theme
 @inject LocalizationService L
 @inject ToastService Toasts
+@inject IJSRuntime JS
 @inject NavigationManager Nav
 @implements IDisposable
 
@@ -54,7 +55,12 @@ else if (Session.IsAuthenticated)
 
                 <NavLink class="nav-item" href="graph" @onclick="CloseMobileMenu">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" /></svg>
-                    <span>Graphe de corrélation</span>
+                    <span>@L.T("Arbre & Graphe", "Tree & Graph")</span>
+                </NavLink>
+
+                <NavLink class="nav-item" href="scan-audit" @onclick="CloseMobileMenu">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><polyline points="9 11 11 13 15 9" /></svg>
+                    <span>@L.T("Scan, Audit & Démo", "Scan, Audit & Demo")</span>
                 </NavLink>
 
                 <div class="nav-section-label">Investigation & Réponse</div>
@@ -152,11 +158,64 @@ else if (Session.IsAuthenticated)
                         <span>Mode @UiFormatters.OperatingModeLabel(_mode)</span>
                     </a>
 
-                    <span class="status-chip @(_llmAvailable ? "llm-ok" : "llm-off") hide-tablet"
-                          title="@(_llmAvailable ? $"IA locale Ollama active : {_llmModel}" : "IA locale Ollama hors ligne (repli règles déterministes)")">
+                    <a href="/settings" class="status-chip @(_llmAvailable ? "llm-ok" : "llm-off") hide-tablet"
+                       title="@(_llmAvailable ? $"IA locale Ollama active : {_llmModel}" : "Cliquez pour configurer ou re-détecter Ollama Qwen local")">
                         <span class="badge-dot"></span>
                         <span>IA : @(_llmAvailable ? _llmModel : "Hors ligne")</span>
-                    </span>
+                    </a>
+
+                    <!-- Cloche de notifications temps réel In-App -->
+                    <div style="position:relative;">
+                        <button type="button" class="btn btn-icon" title="Centre de notifications temps réel" @onclick="ToggleNotifDrawerAsync">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>
+                            @if (_unreadNotifs > 0)
+                            {
+                                <span style="position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 4px;border-radius:999px;background:#ef4444;color:#fff;font-size:10.5px;font-weight:800;display:grid;place-items:center;">
+                                    @(_unreadNotifs > 99 ? "99+" : _unreadNotifs)
+                                </span>
+                            }
+                        </button>
+
+                        @if (_notifDrawerOpen)
+                        {
+                            <div class="card" style="position:absolute;right:0;top:46px;width:360px;max-height:460px;overflow-y:auto;z-index:999;padding:14px;box-shadow:0 16px 40px rgba(0,0,0,0.45);">
+                                <div class="row-wrap" style="justify-content:space-between;margin-bottom:10px;">
+                                    <strong style="font-size:13.5px;">Notifications temps réel (@_inbox.Count)</strong>
+                                    <div class="row-wrap" style="gap:6px;">
+                                        @if (_unreadNotifs > 0)
+                                        {
+                                            <button type="button" class="btn btn-sm btn-ghost" @onclick="MarkAllNotificationsReadAsync">Tout lu</button>
+                                        }
+                                        <a href="/settings" class="btn btn-sm btn-ghost" @onclick="() => _notifDrawerOpen = false">Canaux</a>
+                                    </div>
+                                </div>
+
+                                @if (_inbox.Count == 0)
+                                {
+                                    <div class="text-muted" style="font-size:12.5px;padding:18px 0;text-align:center;">
+                                        Aucune notification récente. Les alertes et clusters corrélés apparaissent ici automatiquement.
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="stack-sm" style="gap:8px;">
+                                        @foreach (var n in _inbox.Take(20))
+                                        {
+                                            <div class="card-elevated" style="padding:10px 12px;cursor:pointer;border-left:3px solid @UiFormatters.ThreatLevelHex(n.Level);"
+                                                 @onclick="() => OpenNotificationTarget(n)">
+                                                <div class="row-wrap" style="justify-content:space-between;margin-bottom:3px;">
+                                                    <span class="badge" style="font-size:10px;">@n.TriggerKind · @n.Score/100</span>
+                                                    <span class="mono text-muted" style="font-size:10.5px;">@n.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
+                                                </div>
+                                                <div style="font-weight:700;font-size:12.5px;">@n.Title</div>
+                                                <div class="text-secondary truncate" style="font-size:11.5px;margin-top:2px;">@n.Message</div>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
 
                     <button type="button" class="btn btn-sm btn-ghost" title="@L.T("Changer la langue (FR / EN)", "Switch language (FR / EN)")" @onclick="ToggleLanguageAsync" aria-label="Switch language">
                         <span class="mono">@(L.IsEnglish ? "EN" : "FR")</span>
@@ -204,7 +263,10 @@ else if (Session.IsAuthenticated)
     private OperatingMode _mode = OperatingMode.Learning;
     private bool _llmAvailable;
     private string _llmModel = "Ollama";
-    private string _version = "1.0.0";
+    private string _version = "2.2.0";
+    private bool _notifDrawerOpen;
+    private int _unreadNotifs;
+    private List<InAppNotificationDto> _inbox = new();
 
     private string UserInitials =>
         string.IsNullOrWhiteSpace(Session.Username)
@@ -236,7 +298,8 @@ else if (Session.IsAuthenticated)
             if (string.IsNullOrEmpty(rel)) return "Vue d'ensemble";
             if (rel.StartsWith("alerts/", StringComparison.OrdinalIgnoreCase)) return "Détail de l'alerte";
             if (rel.StartsWith("alerts", StringComparison.OrdinalIgnoreCase)) return "Alertes de sécurité";
-            if (rel.StartsWith("graph", StringComparison.OrdinalIgnoreCase)) return "Graphe de corrélation";
+            if (rel.StartsWith("graph", StringComparison.OrdinalIgnoreCase)) return "Arbre & Flux de corrélation";
+            if (rel.StartsWith("scan-audit", StringComparison.OrdinalIgnoreCase)) return "Scan Général, Audit & Démo";
             if (rel.StartsWith("entities/", StringComparison.OrdinalIgnoreCase)) return "Fiche d'entité";
             if (rel.StartsWith("entities", StringComparison.OrdinalIgnoreCase)) return "Fiches Postes & Entités";
             if (rel.StartsWith("actions", StringComparison.OrdinalIgnoreCase)) return "Actions & blocages";
@@ -259,6 +322,7 @@ else if (Session.IsAuthenticated)
         Hub.SummaryChanged += OnSummaryChanged;
         Hub.AlertRaised += OnAlertRaised;
         Hub.SettingsChanged += OnSettingsChanged;
+        Hub.NotificationPushed += OnNotificationPushed;
         Theme.ThemeChanged += OnThemeChanged;
         L.LanguageChanged += OnLanguageChanged;
         Nav.LocationChanged += OnLocationChanged;
@@ -301,11 +365,39 @@ else if (Session.IsAuthenticated)
 
             ApplySummary(summaryTask.Result);
             var health = healthTask.Result;
-            _version = string.IsNullOrWhiteSpace(health.Version) ? "1.0.0" : health.Version;
+            _version = string.IsNullOrWhiteSpace(health.Version) ? "2.2.0" : health.Version;
             _llmAvailable = health.LlmAvailable;
             if (!string.IsNullOrWhiteSpace(health.LlmModel)) _llmModel = health.LlmModel;
             _mode = health.Mode;
             _serverOnline = true;
+
+            try
+            {
+                var items = await Api.GetNotificationInboxAsync();
+                _inbox = items.ToList();
+                _unreadNotifs = _inbox.Count(x => !x.IsRead);
+            }
+            catch { }
+
+            if (!_llmAvailable)
+            {
+                // Seconde vérification différée après préchauffage initial d'Ollama
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(3500);
+                    try
+                    {
+                        var llm = await Api.GetLlmStatusAsync();
+                        if (llm.Available)
+                        {
+                            _llmAvailable = true;
+                            _llmModel = llm.ActiveModel;
+                            await InvokeAsync(StateHasChanged);
+                        }
+                    }
+                    catch { }
+                });
+            }
         }
         catch (SentinelApiException ex) when (ex.IsUnauthorized)
         {
@@ -380,7 +472,58 @@ else if (Session.IsAuthenticated)
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
     {
         _mobileMenuOpen = false;
-        _ = InvokeAsync(StateHasChanged);
+        _notifDrawerOpen = false;
+        _ = InvokeAsync(async () =>
+        {
+            await RefreshShellStatusAsync();
+            StateHasChanged();
+        });
+    }
+
+    private void OnNotificationPushed(InAppNotificationDto notif)
+    {
+        _inbox.Insert(0, notif);
+        if (_inbox.Count > 60) _inbox.RemoveAt(_inbox.Count - 1);
+        _unreadNotifs = _inbox.Count(x => !x.IsRead);
+        _ = InvokeAsync(async () =>
+        {
+            if (notif.Level >= ThreatLevel.High)
+            {
+                try { await JS.InvokeVoidAsync("sentinelUtils.playAlertChime", notif.Level == ThreatLevel.Critical); } catch { }
+            }
+            StateHasChanged();
+        });
+    }
+
+    private async Task ToggleNotifDrawerAsync()
+    {
+        _notifDrawerOpen = !_notifDrawerOpen;
+        if (_notifDrawerOpen)
+        {
+            try
+            {
+                var items = await Api.GetNotificationInboxAsync();
+                _inbox = items.ToList();
+                _unreadNotifs = _inbox.Count(x => !x.IsRead);
+            }
+            catch { }
+        }
+    }
+
+    private async Task MarkAllNotificationsReadAsync()
+    {
+        try { await Api.MarkNotificationsReadAsync(); } catch { }
+        _inbox = _inbox.Select(x => x with { IsRead = true }).ToList();
+        _unreadNotifs = 0;
+    }
+
+    private void OpenNotificationTarget(InAppNotificationDto notif)
+    {
+        _notifDrawerOpen = false;
+        if (!string.IsNullOrWhiteSpace(notif.TargetUrl))
+        {
+            Nav.NavigateTo(notif.TargetUrl);
+        }
     }
 
     private Task ToggleThemeAsync() => Theme.ToggleAsync();
@@ -403,6 +546,7 @@ else if (Session.IsAuthenticated)
         Hub.SummaryChanged -= OnSummaryChanged;
         Hub.AlertRaised -= OnAlertRaised;
         Hub.SettingsChanged -= OnSettingsChanged;
+        Hub.NotificationPushed -= OnNotificationPushed;
         Theme.ThemeChanged -= OnThemeChanged;
         L.LanguageChanged -= OnLanguageChanged;
         Nav.LocationChanged -= OnLocationChanged;

@@ -48,6 +48,7 @@ public sealed class LiveHubClient : IAsyncDisposable
     public event Action<HostDto>? HostStatusChanged;
     public event Action<DashboardSummaryDto>? SummaryChanged;
     public event Action<SentinelSettings>? SettingsChanged;
+    public event Action<InAppNotificationDto>? NotificationPushed;
 
     public async Task EnsureConnectedAsync(CancellationToken ct = default)
     {
@@ -97,6 +98,7 @@ public sealed class LiveHubClient : IAsyncDisposable
             connection.On<HostDto>(LiveHub.HostStatusChanged, dto => HostStatusChanged?.Invoke(dto));
             connection.On<DashboardSummaryDto>(LiveHub.SummaryChanged, dto => SummaryChanged?.Invoke(dto));
             connection.On<SentinelSettings>(LiveHub.SettingsChanged, dto => SettingsChanged?.Invoke(dto));
+            connection.On<InAppNotificationDto>(LiveHub.NotificationPushed, dto => NotificationPushed?.Invoke(dto));
 
             connection.Reconnecting += ex =>
             {

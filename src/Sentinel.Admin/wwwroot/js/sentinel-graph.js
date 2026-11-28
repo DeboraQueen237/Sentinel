@@ -1,40 +1,24 @@
-/* SENTINEL Admin — Graphe de corrélation Cytoscape.js local */
+/* SENTINEL Admin v2.2 — Graphe causal en Arbre (Racines → Branches → Nœuds → Alertes) & Flux directs/indirects */
 window.sentinelGraph = (() => {
     let cy = null;
     let dotNetRef = null;
-    let lastContainerId = null;
+    let currentLayout = "tree-lr";
 
-    const NODE_SHAPES = {
-        Threat: "diamond",
-        Process: "hexagon",
-        File: "round-rectangle",
-        Domain: "ellipse",
-        Ip: "ellipse",
-        Device: "triangle",
-        Event: "octagon",
-        User: "round-octagon",
-        Host: "rectangle"
+    const ROLE_META = {
+        Host:    { badge: "POSTE",     color: "#6366f1", rank: 0, shape: "round-rectangle" },
+        User:    { badge: "COMPTE",    color: "#10b981", rank: 1, shape: "round-rectangle" },
+        Device:  { badge: "USB / HID", color: "#f97316", rank: 1, shape: "round-rectangle" },
+        Process: { badge: "PROCESSUS", color: "#8b5cf6", rank: 2, shape: "round-rectangle" },
+        Event:   { badge: "ÉVÉNEMENT", color: "#0ea5e9", rank: 3, shape: "round-rectangle" },
+        File:    { badge: "FICHIER",   color: "#eab308", rank: 4, shape: "round-rectangle" },
+        Domain:  { badge: "DOMAINE",   color: "#06b6d4", rank: 4, shape: "round-rectangle" },
+        Ip:      { badge: "RÉSEAU IP", color: "#38bdf8", rank: 4, shape: "round-rectangle" },
+        Threat:  { badge: "MENACE",    color: "#ef4444", rank: 5, shape: "round-octagon" }
     };
 
-    const NODE_ACCENTS = {
-        Threat: "#ef4444",
-        Process: "#8b5cf6",
-        File: "#f59e0b",
-        Domain: "#06b6d4",
-        Ip: "#38bdf8",
-        Device: "#f97316",
-        Event: "#64748b",
-        User: "#10b981",
-        Host: "#6366f1"
-    };
-
-    const LEVEL_COLORS = {
-        Info: "#38bdf8",
-        Low: "#06b6d4",
-        Moderate: "#f59e0b",
-        High: "#f97316",
-        Critical: "#ef4444"
-    };
+    const DIRECT_EDGE_TYPES = new Set([
+        "Spawned", "Wrote", "ConnectedTo", "OpenedUrl", "CopiedFromClipboard", "InvolvedIn"
+    ]);
 
     function isLight() {
         return document.documentElement.getAttribute("data-theme") === "light";
@@ -42,256 +26,321 @@ window.sentinelGraph = (() => {
 
     function buildStylesheet() {
         const light = isLight();
-        const labelColor = light ? "#0f172a" : "#e2e8f0";
-        const labelBg = light ? "rgba(255, 255, 255, 0.88)" : "rgba(7, 11, 20, 0.86)";
-        const nodeBg = light ? "#ffffff" : "#111b2e";
-        const edgeColor = light ? "rgba(51, 65, 85, 0.55)" : "rgba(148, 163, 184, 0.48)";
-        const edgeLabelColor = light ? "#475569" : "#94a3b8";
+        const cardBg = light ? "#ffffff" : "#0f172a";
+        const textPrimary = light ? "#0f172a" : "#f1f5f9";
+        const edgeDirect = light ? "#0284c7" : "#38bdf8";
+        const edgeAlert = "#f97316";
+        const edgeIndirect = light ? "#7c3aed" : "#a78bfa";
+        const edgeLabelBg = light ? "rgba(248, 250, 252, 0.92)" : "rgba(15, 23, 42, 0.9)";
+        const edgeLabelText = light ? "#334155" : "#cbd5e1";
 
         return [
-            {
-                selector: "node[kind = 'cluster']",
-                style: {
-                    "shape": "round-rectangle",
-                    "background-color": "data(clusterBg)",
-                    "background-opacity": light ? 0.08 : 0.12,
-                    "border-color": "data(borderColor)",
-                    "border-width": 2,
-                    "border-style": "dashed",
-                    "padding": "20px",
-                    "label": "data(label)",
-                    "text-valign": "top",
-                    "text-halign": "center",
-                    "text-margin-y": -6,
-                    "color": "data(borderColor)",
-                    "font-size": 11,
-                    "font-weight": 700,
-                    "font-family": "Segoe UI, sans-serif"
-                }
-            },
             {
                 selector: "node[kind = 'entity']",
                 style: {
                     "shape": "data(shape)",
-                    "width": "data(size)",
-                    "height": "data(size)",
-                    "background-color": nodeBg,
-                    "border-color": "data(borderColor)",
+                    "width": "data(width)",
+                    "height": "data(height)",
+                    "background-color": "data(fillBg)",
+                    "border-color": "data(accent)",
                     "border-width": "data(borderWidth)",
-                    "label": "data(shortLabel)",
-                    "color": labelColor,
-                    "font-size": 10,
+                    "label": "data(cardText)",
+                    "color": textPrimary,
+                    "font-size": 10.5,
                     "font-weight": 600,
-                    "font-family": "Segoe UI, sans-serif",
-                    "text-valign": "bottom",
+                    "font-family": "Segoe UI, system-ui, sans-serif",
+                    "text-valign": "center",
                     "text-halign": "center",
-                    "text-margin-y": 6,
-                    "text-background-color": labelBg,
-                    "text-background-opacity": 0.9,
-                    "text-background-padding": "3px",
-                    "text-background-shape": "roundrectangle",
-                    "text-max-width": "120px",
-                    "text-wrap": "ellipsis",
-                    "underlay-color": "data(borderColor)",
+                    "text-wrap": "wrap",
+                    "text-max-width": "148px",
+                    "line-height": 1.28,
+                    "underlay-color": "data(accent)",
                     "underlay-padding": "data(haloPad)",
                     "underlay-opacity": "data(haloOpacity)",
-                    "underlay-shape": "ellipse",
-                    "overlay-padding": 6
+                    "underlay-shape": "round-rectangle",
+                    "transition-property": "opacity, border-width",
+                    "transition-duration": "180ms"
+                }
+            },
+            {
+                selector: "node[nodeType = 'Threat']",
+                style: {
+                    "background-color": light ? "#fef2f2" : "#2a1219",
+                    "font-weight": 700,
+                    "font-size": 11
+                }
+            },
+            {
+                selector: "node[nodeType = 'Host']",
+                style: {
+                    "background-color": light ? "#eef2ff" : "#161e3d",
+                    "font-weight": 700
                 }
             },
             {
                 selector: "node[kind = 'entity']:selected",
                 style: {
                     "border-width": 4,
-                    "background-color": "data(borderColor)",
-                    "color": light ? "#0f172a" : "#ffffff",
+                    "border-color": "#22d3ee",
+                    "underlay-color": "#22d3ee",
+                    "underlay-padding": 9,
+                    "underlay-opacity": 0.3,
                     "z-index": 99
                 }
             },
             {
-                selector: "edge",
+                selector: "edge[flowClass = 'direct']",
                 style: {
-                    "width": "data(width)",
-                    "line-color": edgeColor,
-                    "target-arrow-color": edgeColor,
+                    "width": 2.1,
+                    "line-color": edgeDirect,
+                    "target-arrow-color": edgeDirect,
+                    "target-arrow-shape": "triangle",
+                    "curve-style": "taxi",
+                    "taxi-direction": "horizontal",
+                    "taxi-turn": "45%",
+                    "arrow-scale": 0.9,
+                    "label": "data(label)",
+                    "font-size": 9,
+                    "font-family": "Segoe UI, sans-serif",
+                    "color": edgeLabelText,
+                    "text-background-color": edgeLabelBg,
+                    "text-background-opacity": 0.9,
+                    "text-background-padding": "2px",
+                    "text-background-shape": "roundrectangle"
+                }
+            },
+            {
+                selector: "edge[flowClass = 'alert']",
+                style: {
+                    "width": 2.3,
+                    "line-color": edgeAlert,
+                    "target-arrow-color": edgeAlert,
                     "target-arrow-shape": "triangle",
                     "curve-style": "bezier",
+                    "arrow-scale": 0.95,
+                    "label": "data(label)",
+                    "font-size": 9,
+                    "color": edgeAlert,
+                    "text-background-color": edgeLabelBg,
+                    "text-background-opacity": 0.9,
+                    "text-background-padding": "2px"
+                }
+            },
+            {
+                selector: "edge[flowClass = 'indirect']",
+                style: {
+                    "width": 1.9,
+                    "line-style": "dashed",
+                    "line-dash-pattern": [6, 4],
+                    "line-color": edgeIndirect,
+                    "target-arrow-color": edgeIndirect,
+                    "target-arrow-shape": "vee",
+                    "curve-style": "unbundled-bezier",
+                    "control-point-distances": [34],
+                    "control-point-weights": [0.5],
                     "arrow-scale": 0.9,
                     "label": "data(label)",
                     "font-size": 8.5,
-                    "font-family": "Consolas, monospace",
-                    "color": edgeLabelColor,
-                    "text-rotation": "autorotate",
-                    "text-background-color": labelBg,
-                    "text-background-opacity": 0.88,
-                    "text-background-padding": "2px",
-                    "text-opacity": 0.85
-                }
-            },
-            {
-                selector: "edge[edgeType = 'Sequence']",
-                style: {
-                    "line-style": "dashed",
-                    "line-dash-pattern": [6, 3],
-                    "line-color": "#ef4444",
-                    "target-arrow-color": "#ef4444",
-                    "width": 2.6,
-                    "color": "#ef4444",
-                    "text-opacity": 1
-                }
-            },
-            {
-                selector: "edge[edgeType = 'Spawned'], edge[edgeType = 'OpenedUrl'], edge[edgeType = 'CopiedFromClipboard']",
-                style: {
-                    "line-color": "#06b6d4",
-                    "target-arrow-color": "#06b6d4"
-                }
-            },
-            {
-                selector: "edge[edgeType = 'Wrote'], edge[edgeType = 'ConnectedTo']",
-                style: {
-                    "line-color": "#8b5cf6",
-                    "target-arrow-color": "#8b5cf6"
+                    "color": edgeIndirect,
+                    "text-background-color": edgeLabelBg,
+                    "text-background-opacity": 0.9,
+                    "text-background-padding": "2px"
                 }
             },
             {
                 selector: "edge:selected",
                 style: {
                     "width": 3.5,
-                    "line-color": "#f59e0b",
-                    "target-arrow-color": "#f59e0b",
+                    "line-color": "#fbbf24",
+                    "target-arrow-color": "#fbbf24",
                     "z-index": 90
                 }
             },
             {
                 selector: ".dimmed",
-                style: {
-                    "opacity": 0.16
-                }
+                style: { "opacity": 0.14 }
+            },
+            {
+                selector: ".hidden-filter",
+                style: { "display": "none" }
             },
             {
                 selector: ".highlighted",
-                style: {
-                    "opacity": 1,
-                    "z-index": 50
-                }
+                style: { "opacity": 1, "z-index": 60 }
             }
         ];
     }
 
-    function layoutOptions(name) {
-        switch (name) {
-            case "breadthfirst":
-                return { name: "breadthfirst", directed: true, padding: 36, spacingFactor: 1.35, animate: true, animationDuration: 450 };
-            case "concentric":
-                return {
-                    name: "concentric",
-                    padding: 36,
-                    animate: true,
-                    animationDuration: 450,
-                    concentric: n => n.data("score") || 10,
-                    levelWidth: () => 20
-                };
-            case "circle":
-                return { name: "circle", padding: 36, animate: true, animationDuration: 450 };
-            case "grid":
-                return { name: "grid", padding: 36, animate: true, animationDuration: 450 };
-            case "cose":
-            default:
-                return {
-                    name: "cose",
-                    padding: 40,
-                    animate: true,
-                    animationDuration: 550,
-                    nodeRepulsion: () => 9000,
-                    idealEdgeLength: () => 115,
-                    edgeElasticity: () => 120,
-                    nestingFactor: 1.2
-                };
+    function computeTreePositions(nodes, edges, vertical) {
+        // Regroupe les nœuds par rang causal (0: Poste -> 1: Acteur -> 2: Processus -> 3: Événement -> 4: Cible -> 5: Menace)
+        const ranks = new Map();
+        const nodeMap = new Map();
+        for (const n of nodes) {
+            nodeMap.set(n.id, n);
+            const r = typeof n.rank === "number" ? n.rank : 3;
+            if (!ranks.has(r)) ranks.set(r, []);
+            ranks.get(r).push(n);
         }
+
+        // Index parent -> enfants pour aligner visuellement les branches d'un même arbre
+        const incoming = new Map();
+        for (const e of edges) {
+            if (!incoming.has(e.target)) incoming.set(e.target, []);
+            incoming.get(e.target).push(e.source);
+        }
+
+        const positions = {};
+        const orderIndex = new Map();
+        const sortedRanks = Array.from(ranks.keys()).sort((a, b) => a - b);
+
+        const colSpacing = vertical ? 125 : 245;
+        const rowSpacing = vertical ? 195 : 82;
+
+        sortedRanks.forEach((rankKey, colIdx) => {
+            const list = ranks.get(rankKey);
+            list.sort((a, b) => {
+                const pa = (incoming.get(a.id) || []).map(id => orderIndex.get(id)).filter(v => v !== undefined);
+                const pb = (incoming.get(b.id) || []).map(id => orderIndex.get(id)).filter(v => v !== undefined);
+                const avgA = pa.length ? pa.reduce((s, x) => s + x, 0) / pa.length : 999;
+                const avgB = pb.length ? pb.reduce((s, x) => s + x, 0) / pb.length : 999;
+                if (Math.abs(avgA - avgB) > 0.01) return avgA - avgB;
+                if ((a.clusterId || "") !== (b.clusterId || "")) return (a.clusterId || "").localeCompare(b.clusterId || "");
+                return (b.score || 0) - (a.score || 0);
+            });
+
+            const mid = (list.length - 1) / 2.0;
+            list.forEach((n, idx) => {
+                orderIndex.set(n.id, idx);
+                const offset = (idx - mid) * rowSpacing;
+                const depth = colIdx * colSpacing;
+                positions[n.id] = vertical
+                    ? { x: offset, y: depth }
+                    : { x: depth, y: offset };
+            });
+        });
+
+        return positions;
     }
 
-    function render(containerId, payload, layoutName, groupClusters, netRef) {
+    function buildLayoutConfig(layoutName, rawNodes, rawEdges) {
+        if (layoutName === "tree-tb") {
+            const pos = computeTreePositions(rawNodes, rawEdges, true);
+            return { name: "preset", positions: n => pos[n.id()] || { x: 0, y: 0 }, fit: true, padding: 42 };
+        }
+        if (layoutName === "concentric") {
+            return {
+                name: "concentric",
+                padding: 44,
+                animate: true,
+                animationDuration: 380,
+                minNodeSpacing: 36,
+                concentric: n => 6 - (n.data("rank") || 3),
+                levelWidth: () => 1
+            };
+        }
+        if (layoutName === "cose") {
+            return {
+                name: "cose",
+                padding: 46,
+                animate: true,
+                animationDuration: 450,
+                nodeRepulsion: () => 22000,
+                idealEdgeLength: () => 150,
+                nodeOverlap: 32
+            };
+        }
+        // Par défaut : Arbre causal Gauche -> Droite (Racines -> Branches -> Menaces)
+        const pos = computeTreePositions(rawNodes, rawEdges, false);
+        return { name: "preset", positions: n => pos[n.id()] || { x: 0, y: 0 }, fit: true, padding: 44 };
+    }
+
+    function formatCardLabel(n, meta) {
+        const raw = n.label || n.id;
+        const clean = raw.length > 34 ? `${raw.substring(0, 32)}…` : raw;
+        const scoreTag = (n.type === "Threat" || (n.type === "Event" && n.score >= 55)) ? ` · ${n.score}` : "";
+        return `${meta.badge}${scoreTag}\n${clean}`;
+    }
+
+    function pickNodeAccent(n, meta) {
+        if (n.type === "Threat") {
+            return n.score >= 90 ? "#ef4444" : (n.score >= 75 ? "#f97316" : "#f59e0b");
+        }
+        if (n.type === "Event") {
+            if (n.score >= 90) return "#f97316"; // Orange vif au lieu de tout peindre en rouge sang
+            if (n.score >= 70) return "#f59e0b";
+            return "#0ea5e9";
+        }
+        return meta.color;
+    }
+
+    function render(containerId, payload, layoutName, _groupClusters, netRef) {
         if (typeof cytoscape === "undefined") return;
         const container = document.getElementById(containerId);
         if (!container) return;
 
         destroy();
-        lastContainerId = containerId;
+        currentLayout = layoutName || "tree-lr";
         dotNetRef = netRef;
 
+        const light = isLight();
+        const defaultCardBg = light ? "#ffffff" : "#0f172a";
         const elements = [];
-        const clusterIds = new Set();
-
-        if (groupClusters && payload && Array.isArray(payload.clusters)) {
-            for (const c of payload.clusters) {
-                const cid = `cluster:${c.id}`;
-                clusterIds.add(c.id);
-                const color = LEVEL_COLORS[c.level] || "#8b5cf6";
-                const title = c.chainName
-                    ? `${c.chainName} • Score ${c.score}`
-                    : `Cluster ${String(c.id).substring(0, 6)} • Score ${c.score}`;
-                elements.push({
-                    group: "nodes",
-                    data: {
-                        id: cid,
-                        rawClusterId: c.id,
-                        kind: "cluster",
-                        label: title,
-                        borderColor: color,
-                        clusterBg: color,
-                        score: c.score || 50
-                    }
-                });
-            }
-        }
-
+        const rawNodes = [];
+        const rawEdges = [];
         const nodeIdSet = new Set();
+
         if (payload && Array.isArray(payload.nodes)) {
             for (const n of payload.nodes) {
                 nodeIdSet.add(n.id);
-                const levelColor = LEVEL_COLORS[n.level] || NODE_ACCENTS[n.type] || "#06b6d4";
-                const borderColor = (n.score >= 55 || n.type === "Threat") ? levelColor : (NODE_ACCENTS[n.type] || levelColor);
-                const size = Math.max(30, Math.min(54, 30 + Math.round((n.score || 0) * 0.24)));
-                const shortLabel = n.label && n.label.length > 26 ? `${n.label.substring(0, 24)}…` : (n.label || n.id);
-                const nodeData = {
+                const meta = ROLE_META[n.type] || ROLE_META.Event;
+                const rank = typeof n.rank === "number" ? n.rank : meta.rank;
+                const accent = pickNodeAccent(n, meta);
+                const isThreat = n.type === "Threat";
+                const nodeObj = {
                     id: n.id,
                     kind: "entity",
                     nodeType: n.type,
+                    category: n.category || "",
+                    mitre: n.mitre || "",
                     label: n.label || n.id,
-                    shortLabel,
+                    cardText: formatCardLabel(n, meta),
                     score: n.score || 0,
                     level: n.level || "Info",
+                    rank,
                     clusterId: n.clusterId || null,
-                    shape: NODE_SHAPES[n.type] || "ellipse",
-                    borderColor,
-                    borderWidth: n.score >= 75 ? 3.5 : 2.2,
-                    size,
-                    haloPad: n.score >= 75 ? 10 : (n.score >= 30 ? 5 : 0),
-                    haloOpacity: n.score >= 75 ? 0.28 : (n.score >= 30 ? 0.14 : 0)
+                    shape: meta.shape,
+                    accent,
+                    fillBg: defaultCardBg,
+                    borderWidth: isThreat ? 3.2 : 2,
+                    width: isThreat ? 174 : 160,
+                    height: isThreat ? 54 : 46,
+                    haloPad: isThreat ? 7 : 0,
+                    haloOpacity: isThreat ? 0.22 : 0
                 };
-                if (groupClusters && n.clusterId && clusterIds.has(n.clusterId)) {
-                    nodeData.parent = `cluster:${n.clusterId}`;
-                }
-                elements.push({ group: "nodes", data: nodeData });
+                rawNodes.push(nodeObj);
+                elements.push({ group: "nodes", data: nodeObj });
             }
         }
 
         if (payload && Array.isArray(payload.edges)) {
             for (const e of payload.edges) {
                 if (!nodeIdSet.has(e.source) || !nodeIdSet.has(e.target)) continue;
-                elements.push({
-                    group: "edges",
-                    data: {
-                        id: e.id,
-                        source: e.source,
-                        target: e.target,
-                        edgeType: e.type,
-                        weight: e.weight || 0.5,
-                        width: Math.max(1.4, Math.min(3.4, 1.3 + (e.weight || 0.5) * 2.1)),
-                        label: e.label || e.type
-                    }
-                });
+                const isToThreat = String(e.target).startsWith("threat:");
+                const flowClass = isToThreat
+                    ? "alert"
+                    : (DIRECT_EDGE_TYPES.has(e.type) ? "direct" : "indirect");
+
+                const edgeObj = {
+                    id: e.id,
+                    source: e.source,
+                    target: e.target,
+                    edgeType: e.type,
+                    flowClass,
+                    weight: e.weight || 0.5,
+                    label: e.label || e.type
+                };
+                rawEdges.push(edgeObj);
+                elements.push({ group: "edges", data: edgeObj });
             }
         }
 
@@ -299,24 +348,25 @@ window.sentinelGraph = (() => {
             container,
             elements,
             style: buildStylesheet(),
-            layout: elements.length > 0 ? layoutOptions(layoutName || "cose") : { name: "preset" },
-            minZoom: 0.2,
-            maxZoom: 3.2
+            layout: elements.length > 0 ? buildLayoutConfig(currentLayout, rawNodes, rawEdges) : { name: "preset" },
+            minZoom: 0.22,
+            maxZoom: 2.8,
+            wheelSensitivity: 0.25
         });
 
         cy.on("tap", "node[kind = 'entity']", evt => {
-            const id = evt.target.data("id");
+            const node = evt.target;
+            traceBranch(node);
+            const id = node.data("id");
             if (dotNetRef) dotNetRef.invokeMethodAsync("OnNodeSelected", id);
         });
 
-        cy.on("tap", "node[kind = 'cluster']", evt => {
-            const cid = evt.target.data("rawClusterId");
-            if (dotNetRef && cid) dotNetRef.invokeMethodAsync("OnClusterSelected", cid);
-        });
-
         cy.on("tap", "edge", evt => {
-            const id = evt.target.data("id");
-            if (dotNetRef) dotNetRef.invokeMethodAsync("OnEdgeSelected", id);
+            clearHighlight();
+            const edge = evt.target;
+            cy.elements().addClass("dimmed");
+            edge.union(edge.connectedNodes()).removeClass("dimmed").addClass("highlighted");
+            if (dotNetRef) dotNetRef.invokeMethodAsync("OnEdgeSelected", edge.data("id"));
         });
 
         cy.on("tap", evt => {
@@ -327,24 +377,83 @@ window.sentinelGraph = (() => {
         });
     }
 
+    // Met en évidence toute la branche causale (racines amont + feuilles aval) du nœud cliqué
+    function traceBranch(node) {
+        if (!cy || !node) return;
+        clearHighlight();
+        const upstream = node.predecessors();
+        const downstream = node.successors();
+        const branch = node.union(upstream).union(downstream);
+        cy.elements().addClass("dimmed");
+        branch.removeClass("dimmed").addClass("highlighted");
+    }
+
+    function applyFilter(filter) {
+        if (!cy) return;
+        cy.elements().removeClass("hidden-filter dimmed highlighted");
+        if (!filter) return;
+
+        const q = (filter.search || "").trim().toLowerCase();
+        const nodeType = filter.nodeType || "";
+        const flowMode = filter.flowMode || "all";
+        const hideSystemNoise = !!filter.hideSystemNoise;
+
+        cy.nodes().forEach(n => {
+            let hide = false;
+            if (hideSystemNoise && n.data("category") === "System" && n.data("nodeType") === "Event") {
+                hide = true;
+            }
+            if (!hide && nodeType && n.data("nodeType") !== nodeType) {
+                hide = true;
+            }
+            if (hide) {
+                n.addClass("hidden-filter");
+                n.connectedEdges().addClass("hidden-filter");
+            }
+        });
+
+        if (flowMode === "direct") {
+            cy.edges("[flowClass = 'indirect']").addClass("hidden-filter");
+        } else if (flowMode === "indirect") {
+            cy.edges("[flowClass = 'direct']").addClass("hidden-filter");
+        }
+
+        if (q.length > 0) {
+            const matched = cy.nodes().filter(n =>
+                !n.hasClass("hidden-filter") &&
+                (String(n.data("label") || "").toLowerCase().includes(q) ||
+                 String(n.data("nodeType") || "").toLowerCase().includes(q) ||
+                 String(n.data("mitre") || "").toLowerCase().includes(q)));
+
+            if (matched.length > 0) {
+                const keep = matched.union(matched.predecessors()).union(matched.successors());
+                cy.elements().not(".hidden-filter").addClass("dimmed");
+                keep.removeClass("dimmed").addClass("highlighted");
+            }
+        }
+    }
+
     function setLayout(layoutName) {
         if (!cy) return;
-        cy.layout(layoutOptions(layoutName || "cose")).run();
+        currentLayout = layoutName || "tree-lr";
+        const rawNodes = cy.nodes().not(".hidden-filter").map(n => n.data());
+        const rawEdges = cy.edges().not(".hidden-filter").map(e => e.data());
+        cy.layout(buildLayoutConfig(currentLayout, rawNodes, rawEdges)).run();
     }
 
     function zoomIn() {
         if (!cy) return;
-        cy.animate({ zoom: { level: Math.min(3.2, cy.zoom() * 1.25), renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } } }, { duration: 180 });
+        cy.animate({ zoom: { level: Math.min(2.8, cy.zoom() * 1.25), renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } } }, { duration: 160 });
     }
 
     function zoomOut() {
         if (!cy) return;
-        cy.animate({ zoom: { level: Math.max(0.2, cy.zoom() * 0.8), renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } } }, { duration: 180 });
+        cy.animate({ zoom: { level: Math.max(0.22, cy.zoom() * 0.8), renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } } }, { duration: 160 });
     }
 
     function fit() {
         if (!cy) return;
-        cy.animate({ fit: { padding: 36 } }, { duration: 280 });
+        cy.animate({ fit: { eles: cy.elements().not(".hidden-filter"), padding: 42 } }, { duration: 260 });
     }
 
     function clearHighlight() {
@@ -359,20 +468,20 @@ window.sentinelGraph = (() => {
             fit();
             return;
         }
-        const members = cy.nodes().filter(n => n.data("clusterId") === clusterId || n.data("rawClusterId") === clusterId);
+        const members = cy.nodes().filter(n => n.data("clusterId") === clusterId);
         if (members.length === 0) return;
-        const connected = members.union(members.connectedEdges()).union(members.ancestors());
+        const branch = members.union(members.predecessors()).union(members.successors());
         cy.elements().addClass("dimmed");
-        connected.removeClass("dimmed").addClass("highlighted");
-        cy.animate({ fit: { eles: connected, padding: 52 } }, { duration: 380 });
+        branch.removeClass("dimmed").addClass("highlighted");
+        cy.animate({ fit: { eles: branch, padding: 48 } }, { duration: 340 });
     }
 
     function exportPng(fileName) {
         if (!cy) return false;
-        const bg = isLight() ? "#f4f7fb" : "#070b14";
+        const bg = isLight() ? "#f8fafc" : "#070b14";
         const dataUrl = cy.png({ full: true, scale: 2, bg });
         if (window.sentinelUtils) {
-            window.sentinelUtils.downloadDataUrl(fileName || "sentinel-graphe-correlation.png", dataUrl);
+            window.sentinelUtils.downloadDataUrl(fileName || "sentinel-arbre-causal.png", dataUrl);
         }
         return true;
     }
@@ -384,20 +493,16 @@ window.sentinelGraph = (() => {
 
     function destroy() {
         if (cy) {
-            try {
-                cy.destroy();
-            } catch {
-                // Ignoré
-            }
+            try { cy.destroy(); } catch { }
             cy = null;
         }
         dotNetRef = null;
-        lastContainerId = null;
     }
 
     return {
         render,
         setLayout,
+        applyFilter,
         zoomIn,
         zoomOut,
         fit,

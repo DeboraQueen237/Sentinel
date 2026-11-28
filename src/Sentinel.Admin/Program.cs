@@ -50,7 +50,7 @@ try
     builder.Services.AddHttpClient("SentinelServer", client =>
     {
         client.BaseAddress = new Uri(serverUrl + "/");
-        client.Timeout = TimeSpan.FromSeconds(30);
+        client.Timeout = TimeSpan.FromSeconds(120);
     });
 
     builder.Services.AddHttpClient("SentinelReports", client =>

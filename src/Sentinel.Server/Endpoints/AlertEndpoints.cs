@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
+using Sentinel.AI;
 using Sentinel.Core.Abstractions;
 using Sentinel.Server.Hubs;
 using Sentinel.Server.Services;
 using Sentinel.Shared.Api;
+using Sentinel.Shared.Json;
 using Sentinel.Shared.Models;
 using Sentinel.Storage;
 using Sentinel.Storage.Entities;
@@ -324,6 +326,45 @@ internal static class AlertEndpoints
             return await TransitionSimpleStatusAsync(
                 id, AlertStatus.Resolved, "Resolved", "AlertResolved",
                 ctx, dbFactory, auditWriter, broadcaster, ct).ConfigureAwait(false);
+        });
+
+        app.MapPost(ApiRoutes.AlertAiAnalyze, async (
+            Guid id,
+            IDbContextFactory<SentinelDbContext> dbFactory,
+            ILlmAssessor llm,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+            var alert = await db.Alerts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id, ct).ConfigureAwait(false);
+            if (alert is null)
+                return EndpointHelpers.Error(StatusCodes.Status404NotFound, "ALERT_NOT_FOUND", "Alerte introuvable.");
+
+            var mitre = string.IsNullOrWhiteSpace(alert.MitreTechniquesJson)
+                ? Array.Empty<string>()
+                : (SentinelJson.Deserialize<List<string>>(alert.MitreTechniquesJson)?.ToArray() ?? Array.Empty<string>());
+
+            var analysis = await llm.AnalyzeIncidentAsync(
+                alert.Id.ToString("D"),
+                alert.Title,
+                alert.Score,
+                alert.Level,
+                alert.ThreatType,
+                $"{alert.Summary} | {alert.Justification}",
+                mitre,
+                ct).ConfigureAwait(false);
+
+            return Results.Ok(analysis);
+        });
+
+        app.MapPost(ApiRoutes.AlertsPurgeDuplicates, async (
+            HttpContext ctx,
+            SystemScanAndAuditService scanner,
+            LiveBroadcaster broadcaster,
+            CancellationToken ct) =>
+        {
+            var res = await scanner.PurgeDuplicateNoiseAlertsAsync(EndpointHelpers.GetActor(ctx), ct).ConfigureAwait(false);
+            broadcaster.NotifySummaryChanged();
+            return Results.Ok(res);
         });
     }
 

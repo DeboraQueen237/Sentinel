@@ -49,9 +49,64 @@ internal static class NotificationAndLlmEndpoints
             return Results.Ok(BuildLlmStatusDto(llm, pipeline));
         });
 
-        // --------------------------------------------------------------------- Notifications administrateur multi-canaux
+        // --------------------------------------------------------------------- Scan système général, Audit sécurité & Démo
+        app.MapPost(ApiRoutes.SystemScan, async (
+            HttpContext ctx,
+            SystemScanAndAuditService scanner,
+            CancellationToken ct) =>
+        {
+            var req = await EndpointHelpers.ReadOptionalJsonAsync<SystemScanRequest>(ctx.Request, ct).ConfigureAwait(false)
+                      ?? new SystemScanRequest();
+            var report = await scanner.RunGeneralSystemScanAsync(
+                req.IngestAnomalies,
+                req.IncludeAiSummary,
+                EndpointHelpers.GetActor(ctx),
+                ct).ConfigureAwait(false);
+            return Results.Ok(report);
+        });
+
+        app.MapGet(ApiRoutes.SystemScanLast, (SystemScanAndAuditService scanner) =>
+            Results.Ok(scanner.LastScanReport));
+
+        app.MapPost(ApiRoutes.SystemSecurityAudit, async (
+            HttpContext ctx,
+            SystemScanAndAuditService scanner,
+            CancellationToken ct) =>
+        {
+            var report = await scanner.RunSystemSecurityAuditAsync(
+                includeAiPlan: true,
+                actor: EndpointHelpers.GetActor(ctx),
+                ct: ct).ConfigureAwait(false);
+            return Results.Ok(report);
+        });
+
+        app.MapGet(ApiRoutes.SystemSecurityAuditLast, (SystemScanAndAuditService scanner) =>
+            Results.Ok(scanner.LastAuditReport));
+
+        app.MapPost(ApiRoutes.DemoRun, async (
+            [FromBody] DemoRunRequest request,
+            HttpContext ctx,
+            SystemScanAndAuditService scanner,
+            CancellationToken ct) =>
+        {
+            if (request is null || string.IsNullOrWhiteSpace(request.ScenarioId))
+            {
+                return EndpointHelpers.Error(StatusCodes.Status400BadRequest, "INVALID_SCENARIO", "Spécifiez un identifiant de scénario.");
+            }
+
+            var result = await scanner.RunDemoScenarioAsync(request.ScenarioId, EndpointHelpers.GetActor(ctx), ct).ConfigureAwait(false);
+            return Results.Ok(result);
+        });
+
+        // --------------------------------------------------------------------- Notifications administrateur multi-canaux + Inbox In-App
         app.MapGet(ApiRoutes.NotificationStatus, (IAlertNotificationDispatcher notifications) =>
             Results.Ok(notifications.GetStatus()));
+
+        app.MapGet(ApiRoutes.NotificationInbox, (IAlertNotificationDispatcher notifications) =>
+            Results.Ok(notifications.GetInbox()));
+
+        app.MapPost(ApiRoutes.NotificationInboxReadAll, (IAlertNotificationDispatcher notifications) =>
+            Results.Ok(new { markedRead = notifications.MarkAllRead() }));
 
         app.MapPost(ApiRoutes.NotificationTest, async (
             [FromBody] NotificationTestRequest request,
@@ -62,7 +117,7 @@ internal static class NotificationAndLlmEndpoints
         {
             if (request is null || string.IsNullOrWhiteSpace(request.Channel))
             {
-                return EndpointHelpers.Error(StatusCodes.Status400BadRequest, "INVALID_CHANNEL", "Spécifiez un canal : email, whatsapp ou webhook.");
+                return EndpointHelpers.Error(StatusCodes.Status400BadRequest, "INVALID_CHANNEL", "Spécifiez un canal : inapp, email, sms, whatsapp ou webhook.");
             }
 
             var delivery = await notifications.SendTestAsync(request.Channel, ct).ConfigureAwait(false);
@@ -92,9 +147,9 @@ internal static class NotificationAndLlmEndpoints
 
             var status = secretStore.Update(request);
 
-            // Journaliser uniquement quels types de secrets ont été modifiés (JAMAIS leurs valeurs)
-            var changed = new List<string>(3);
+            var changed = new List<string>(4);
             if (!string.IsNullOrWhiteSpace(request.SmtpPassword) || request.ClearSmtpPassword) changed.Add("smtp");
+            if (!string.IsNullOrWhiteSpace(request.SmsApiToken) || request.ClearSmsToken) changed.Add("sms");
             if (!string.IsNullOrWhiteSpace(request.WhatsAppAccessToken) || request.ClearWhatsAppToken) changed.Add("whatsapp");
             if (!string.IsNullOrWhiteSpace(request.WebhookSecret) || request.ClearWebhookSecret) changed.Add("webhook");
 

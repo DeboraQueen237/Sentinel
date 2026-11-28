@@ -15,12 +15,12 @@ public sealed record OutboxEntry(long Sequence, SecurityEvent Event);
 /// </summary>
 public sealed class SqliteEventOutbox : IDisposable
 {
-    private readonly string _connectionString;
+    private string _connectionString;
     private readonly int _maxCapacity;
     private readonly object _gate = new();
     private bool _disposed;
 
-    public string DatabasePath { get; }
+    public string DatabasePath { get; private set; }
 
     public SqliteEventOutbox(string? databasePath = null, int maxCapacity = 50_000)
     {
@@ -38,16 +38,65 @@ public sealed class SqliteEventOutbox : IDisposable
             Directory.CreateDirectory(dir);
         }
 
-        var builder = new SqliteConnectionStringBuilder
-        {
-            DataSource = DatabasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
-            Pooling = true
-        };
-        _connectionString = builder.ToString();
+        _connectionString = BuildConnectionString(DatabasePath);
+        InitializeSchemaWithSelfHealing();
+    }
 
-        InitializeSchema();
+    private static string BuildConnectionString(string path) => new SqliteConnectionStringBuilder
+    {
+        DataSource = path,
+        Mode = SqliteOpenMode.ReadWriteCreate,
+        Cache = SqliteCacheMode.Shared,
+        Pooling = true
+    }.ToString();
+
+    private void InitializeSchemaWithSelfHealing()
+    {
+        try
+        {
+            InitializeSchema();
+        }
+        catch (SqliteException)
+        {
+            // Auto-réparation : si la base tampon locale (.db/.wal/.shm) est corrompue ou verrouillée par une ancienne instance,
+            // on l'isole proprement ou on bascule sur un fichier tampon sain afin d'éviter toute boucle de crash du service.
+            RecoverCorruptedOrLockedOutbox();
+            InitializeSchema();
+        }
+    }
+
+    private void RecoverCorruptedOrLockedOutbox()
+    {
+        try
+        {
+            using var tmpConn = new SqliteConnection(_connectionString);
+            SqliteConnection.ClearPool(tmpConn);
+        }
+        catch { }
+
+        var suffix = $".corrupt-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}";
+        var movedMain = false;
+        foreach (var ext in new[] { string.Empty, "-wal", "-shm" })
+        {
+            var file = DatabasePath + ext;
+            if (!File.Exists(file)) continue;
+            try
+            {
+                File.Move(file, file + suffix, overwrite: true);
+                if (ext.Length == 0) movedMain = true;
+            }
+            catch
+            {
+                // Fichier verrouillé par un autre processus : bascule sur un fichier outbox dédié au PID courant
+            }
+        }
+
+        if (!movedMain && File.Exists(DatabasePath))
+        {
+            var dir = Path.GetDirectoryName(DatabasePath) ?? SentinelPaths.Outbox;
+            DatabasePath = Path.Combine(dir, $"agent-outbox-{Environment.ProcessId}.db");
+            _connectionString = BuildConnectionString(DatabasePath);
+        }
     }
 
     private void InitializeSchema()

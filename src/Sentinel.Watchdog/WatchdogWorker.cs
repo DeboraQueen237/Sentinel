@@ -22,6 +22,8 @@ namespace Sentinel.Watchdog;
 /// </summary>
 public sealed class WatchdogWorker : BackgroundService
 {
+    private static readonly TimeSpan ServiceTamperingAlertCooldown = TimeSpan.FromMinutes(15);
+
     private readonly WatchdogOptions _options;
     private readonly ILogger<WatchdogWorker> _logger;
     private readonly string _alertFilePath;
@@ -29,6 +31,9 @@ public sealed class WatchdogWorker : BackgroundService
     private readonly HashSet<string> _reportedViolations = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _knownInstalledServices = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _reportedDeletedServices = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> _lastStoppedAlertUtc = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> _nextRestartAttemptUtc = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _consecutiveRestartFailures = new(StringComparer.OrdinalIgnoreCase);
 
     public WatchdogWorker(IOptions<WatchdogOptions> options, ILogger<WatchdogWorker> logger)
     {
@@ -129,6 +134,14 @@ public sealed class WatchdogWorker : BackgroundService
                 sc.Refresh();
                 if (sc.Status is ServiceControllerStatus.Running or ServiceControllerStatus.StartPending)
                 {
+                    _consecutiveRestartFailures.Remove(serviceName);
+                    _nextRestartAttemptUtc.Remove(serviceName);
+                    continue;
+                }
+
+                var now = DateTimeOffset.UtcNow;
+                if (_nextRestartAttemptUtc.TryGetValue(serviceName, out var nextTry) && now < nextTry)
+                {
                     continue;
                 }
 
@@ -142,13 +155,34 @@ public sealed class WatchdogWorker : BackgroundService
                     sc.Start();
                     sc.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(15));
                     restarted = true;
+                    _consecutiveRestartFailures.Remove(serviceName);
+                    _nextRestartAttemptUtc.Remove(serviceName);
                     _logger.LogInformation("Service {Service} redémarré avec succès par Sentinel.Watchdog.", serviceName);
                 }
                 catch (Exception startEx)
                 {
-                    reason += $" Échec du redémarrage : {startEx.Message}";
-                    _logger.LogError(startEx, "Impossible de redémarrer le service {Service}.", serviceName);
+                    var failCount = _consecutiveRestartFailures.GetValueOrDefault(serviceName) + 1;
+                    _consecutiveRestartFailures[serviceName] = failCount;
+                    var backoffSeconds = failCount switch
+                    {
+                        1 => 30,
+                        2 => 120,
+                        3 => 300,
+                        _ => 900
+                    };
+                    _nextRestartAttemptUtc[serviceName] = now.AddSeconds(backoffSeconds);
+                    reason += $" Échec du redémarrage (tentative #{failCount}, prochain essai dans {backoffSeconds}s) : {startEx.Message}";
+                    _logger.LogError(startEx, "Impossible de redémarrer le service {Service} (backoff {Sec}s).", serviceName, backoffSeconds);
                 }
+
+                // Anti-spam : n'émet qu'une seule alerte AgentTampering par fenêtre de 15 minutes pour un même service arrêté
+                if (_lastStoppedAlertUtc.TryGetValue(serviceName, out var lastAlert) &&
+                    (now - lastAlert) < ServiceTamperingAlertCooldown)
+                {
+                    continue;
+                }
+
+                _lastStoppedAlertUtc[serviceName] = now;
 
                 var evt = SecurityEvent.Create(
                     hostId: Environment.MachineName.ToLowerInvariant(),

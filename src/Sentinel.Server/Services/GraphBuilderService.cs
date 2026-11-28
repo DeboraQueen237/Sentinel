@@ -9,9 +9,10 @@ using Sentinel.Storage.Mapping;
 namespace Sentinel.Server.Services;
 
 /// <summary>
-/// Construit le graphe de corrélation complet (doc §5.3, exigence F9) pour Cytoscape.js :
-/// nœuds dédupliqués (<c>Event</c>, <c>Process</c>, <c>File</c>, <c>Domain</c>, <c>IP</c>, <c>User</c>, <c>Device</c>, <c>Threat</c>, <c>Host</c>)
-/// et arêtes typées issues des <c>ClusterLinks</c> et des entités extraites des événements.
+/// Construit un graphe de corrélation hiérarchique lisible en arbre causal :
+/// <c>Racine (Poste)</c> → <c>Acteur (Utilisateur / Périphérique)</c> → <c>Vecteur (Processus parent / enfant)</c>
+/// → <c>Événement dédupliqué (×N)</c> → <c>Cible (Fichier / Domaine / IP)</c> → <c>Menace / Alerte corrélée</c>,
+/// en distinguant les flux causaux directs des flux indirects de corrélation.
 /// </summary>
 public sealed class GraphBuilderService
 {
@@ -70,8 +71,9 @@ public sealed class GraphBuilderService
         }
         else
         {
-            var effectiveTo = to ?? DateTimeOffset.UtcNow;
-            var effectiveFrom = from ?? effectiveTo.AddHours(-24);
+            var now = DateTimeOffset.UtcNow;
+            var effectiveTo = to ?? now.AddMinutes(5);
+            var effectiveFrom = from ?? (to?.AddHours(-24) ?? now.AddHours(-24));
             var fromMs = effectiveFrom.ToUnixTimeMilliseconds();
             var toMs = effectiveTo.ToUnixTimeMilliseconds();
 
@@ -85,8 +87,8 @@ public sealed class GraphBuilderService
                 q = q.Where(e => e.Score >= minScore.Value);
 
             events = await q
-                .OrderByDescending(e => e.Score)
-                .ThenByDescending(e => e.TimestampUnixMs)
+                .OrderByDescending(e => e.TimestampUnixMs)
+                .ThenByDescending(e => e.Score)
                 .Take(clampedLimit)
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
@@ -109,20 +111,22 @@ public sealed class GraphBuilderService
 
         var nodes = new Dictionary<string, MutableNode>(StringComparer.OrdinalIgnoreCase);
         var edges = new Dictionary<string, GraphEdgeDto>(StringComparer.OrdinalIgnoreCase);
-        var includedEventIds = new HashSet<Guid>(events.Select(e => e.Id));
+        var rawEventIdToAggNodeId = new Dictionary<Guid, string>();
 
         MutableNode UpsertNode(
             string id,
             GraphNodeType type,
             string label,
             int score,
+            int rank,
             Guid? nodeClusterId,
             DateTimeOffset? timestamp,
             Action<Dictionary<string, string>>? enrichData = null)
         {
             if (!nodes.TryGetValue(id, out var node))
             {
-                node = new MutableNode(id, type, label, score, nodeClusterId, timestamp);
+                node = new MutableNode(id, type, label, score, rank, nodeClusterId, timestamp);
+                node.Data["rank"] = rank.ToString();
                 nodes[id] = node;
             }
             else
@@ -155,67 +159,110 @@ public sealed class GraphBuilderService
             }
         }
 
-        // 1. Nœuds Événements et Entités associées
-        foreach (var e in events)
+        // Regroupement intelligent des rafales d'événements identiques (ex. 200 AgentTampering -> 1 seul nœud "×200")
+        var groupedEvents = events
+            .OrderBy(e => e.TimestampUnixMs)
+            .GroupBy(e =>
+                $"{e.HostId.Trim().ToLowerInvariant()}|{e.Category}|{e.EventType.Trim().ToLowerInvariant()}|{Truncate(e.Subject, 80).ToLowerInvariant()}|{e.ThreatType}|{e.ClusterId}")
+            .ToList();
+
+        var aggIndex = 0;
+        foreach (var grp in groupedEvents)
         {
-            var attrs = DeserializeDict(e.AttributesJson);
-            var eventNodeId = $"event:{e.Id:D}";
+            aggIndex++;
+            var representative = grp.OrderByDescending(x => x.Score).ThenByDescending(x => x.TimestampUnixMs).First();
+            var firstTs = grp.First().Timestamp;
+            var lastTs = grp.Last().Timestamp;
+            var occurrences = grp.Count();
+
+            var attrs = DeserializeDict(representative.AttributesJson);
+            var mitreList = DeserializeList(representative.MitreTechniquesJson);
+
+            // Conserve l'identifiant event:<guid> lorsqu'unique pour compatibilité totale, sinon event-group
+            var eventNodeId = occurrences == 1
+                ? $"event:{representative.Id:D}"
+                : $"event:{representative.Id:D}";
+
+            foreach (var member in grp)
+            {
+                rawEventIdToAggNodeId[member.Id] = eventNodeId;
+            }
+
+            var baseLabel = $"{representative.EventType}: {Truncate(representative.Subject, 34)}";
+            var displayLabel = occurrences > 1 ? $"{baseLabel} (×{occurrences})" : baseLabel;
 
             UpsertNode(
                 eventNodeId,
                 GraphNodeType.Event,
-                $"{e.EventType}: {Truncate(e.Subject, 42)}",
-                e.Score,
-                e.ClusterId,
-                e.Timestamp,
+                displayLabel,
+                representative.Score,
+                rank: 3,
+                representative.ClusterId,
+                lastTs,
                 d =>
                 {
-                    d["eventId"] = e.Id.ToString("D");
-                    d["category"] = ((EventCategory)e.Category).ToString();
-                    d["eventType"] = e.EventType;
-                    d["subject"] = e.Subject;
-                    d["threatType"] = ((ThreatType)e.ThreatType).ToString();
-                    d["justification"] = Truncate(e.Justification, 220);
+                    d["eventId"] = representative.Id.ToString("D");
+                    d["category"] = ((EventCategory)representative.Category).ToString();
+                    d["eventType"] = representative.EventType;
+                    d["subject"] = representative.Subject;
+                    d["threatType"] = ((ThreatType)representative.ThreatType).ToString();
+                    d["occurrences"] = occurrences.ToString();
+                    if (occurrences > 1)
+                    {
+                        d["firstSeen"] = firstTs.ToString("O");
+                        d["lastSeen"] = lastTs.ToString("O");
+                    }
+                    if (mitreList.Count > 0)
+                        d["mitre"] = string.Join(",", mitreList);
+                    d["justification"] = Truncate(representative.Justification, 240);
                 });
 
-            // Host
-            if (!string.IsNullOrWhiteSpace(e.HostId))
+            // Niveau 0 : Racine Poste (Host)
+            string? upstreamAnchorId = null;
+            if (!string.IsNullOrWhiteSpace(representative.HostId))
             {
-                var hostNodeId = $"host:{e.HostId.Trim().ToLowerInvariant()}";
-                UpsertNode(hostNodeId, GraphNodeType.Host, e.HostId.Trim(), e.Score, e.ClusterId, e.Timestamp,
-                    d => d["hostId"] = e.HostId.Trim());
-                AddEdge(eventNodeId, hostNodeId, GraphEdgeType.InvolvedIn, 0.5, "host");
+                var hostTrim = representative.HostId.Trim();
+                var hostNodeId = $"host:{hostTrim.ToLowerInvariant()}";
+                UpsertNode(hostNodeId, GraphNodeType.Host, hostTrim, Math.Min(representative.Score, 65), rank: 0, null, lastTs,
+                    d => d["hostId"] = hostTrim);
+                upstreamAnchorId = hostNodeId;
             }
 
-            // User
-            if (!string.IsNullOrWhiteSpace(e.UserId) && !e.UserId.Equals("unknown", StringComparison.OrdinalIgnoreCase))
+            // Niveau 1 : Branche Acteur (Utilisateur ou Périphérique USB)
+            var devId = GetAttr(attrs, AttributeKeys.DeviceId) ?? (representative.Category == (int)EventCategory.Device ? representative.Subject : null);
+            if (!string.IsNullOrWhiteSpace(devId))
             {
-                var userNodeId = $"user:{e.UserId.Trim().ToLowerInvariant()}";
-                UpsertNode(userNodeId, GraphNodeType.User, e.UserId.Trim(), e.Score, e.ClusterId, e.Timestamp,
-                    d => d["userId"] = e.UserId.Trim());
-                AddEdge(userNodeId, eventNodeId, GraphEdgeType.InvolvedIn, 0.5, "user");
+                var normDev = devId.Trim().ToLowerInvariant();
+                var devNodeId = $"device:{normDev}";
+                var devLabel = GetAttr(attrs, AttributeKeys.DeviceName) ?? Truncate(devId, 28);
+                UpsertNode(devNodeId, GraphNodeType.Device, devLabel, representative.Score, rank: 1, representative.ClusterId, lastTs, d =>
+                {
+                    d["deviceId"] = devId;
+                    if (GetAttr(attrs, AttributeKeys.DeviceClass) is { } cls) d["class"] = cls;
+                });
+                if (upstreamAnchorId is not null)
+                    AddEdge(upstreamAnchorId, devNodeId, GraphEdgeType.InvolvedIn, 0.7, "port USB");
+                upstreamAnchorId = devNodeId;
+            }
+            else if (!string.IsNullOrWhiteSpace(representative.UserId) &&
+                     !representative.UserId.Equals("unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                var userTrim = representative.UserId.Trim();
+                var userNodeId = $"user:{userTrim.ToLowerInvariant()}";
+                UpsertNode(userNodeId, GraphNodeType.User, userTrim, Math.Min(representative.Score, 50), rank: 1, null, lastTs,
+                    d => d["userId"] = userTrim);
+                if (upstreamAnchorId is not null)
+                    AddEdge(upstreamAnchorId, userNodeId, GraphEdgeType.InvolvedIn, 0.6, "session");
+                upstreamAnchorId = userNodeId;
             }
 
-            // Process + ParentProcess
+            // Niveau 2 : Branche Processus (Parent -> Enfant)
             var procName = GetAttr(attrs, AttributeKeys.ProcessName);
-            var procPath = GetAttr(attrs, AttributeKeys.ProcessPath) ?? (e.Category == (int)EventCategory.Process ? e.Subject : null);
+            var procPath = GetAttr(attrs, AttributeKeys.ProcessPath) ?? (representative.Category == (int)EventCategory.Process ? representative.Subject : null);
             var procKey = !string.IsNullOrWhiteSpace(procPath) ? procPath : procName;
-            string? procNodeId = null;
 
             if (!string.IsNullOrWhiteSpace(procKey))
             {
-                var normProc = procKey.Trim().Replace('/', '\\').ToLowerInvariant();
-                var procLabel = !string.IsNullOrWhiteSpace(procName) ? procName : Path.GetFileName(procKey);
-                procNodeId = $"process:{normProc}";
-                UpsertNode(procNodeId, GraphNodeType.Process, string.IsNullOrWhiteSpace(procLabel) ? procKey : procLabel, e.Score, e.ClusterId, e.Timestamp, d =>
-                {
-                    d["path"] = procKey;
-                    if (GetAttr(attrs, AttributeKeys.ProcessId) is { } pid) d["pid"] = pid;
-                    if (GetAttr(attrs, AttributeKeys.Sha256) is { } sha) d["sha256"] = sha;
-                    if (GetAttr(attrs, AttributeKeys.Signed) is { } signed) d["signed"] = signed;
-                });
-                AddEdge(eventNodeId, procNodeId, GraphEdgeType.InvolvedIn, 0.8, "process");
-
                 var parentName = GetAttr(attrs, AttributeKeys.ParentProcessName);
                 var parentPath = GetAttr(attrs, AttributeKeys.ParentProcessPath);
                 var parentKey = !string.IsNullOrWhiteSpace(parentPath) ? parentPath : parentName;
@@ -223,150 +270,159 @@ public sealed class GraphBuilderService
                 {
                     var parentNodeId = $"process:{parentKey.Trim().Replace('/', '\\').ToLowerInvariant()}";
                     var parentLabel = !string.IsNullOrWhiteSpace(parentName) ? parentName : Path.GetFileName(parentKey);
-                    UpsertNode(parentNodeId, GraphNodeType.Process, string.IsNullOrWhiteSpace(parentLabel) ? parentKey : parentLabel, e.Score, e.ClusterId, e.Timestamp,
+                    UpsertNode(parentNodeId, GraphNodeType.Process, string.IsNullOrWhiteSpace(parentLabel) ? Truncate(parentKey, 28) : parentLabel, Math.Min(representative.Score, 60), rank: 2, representative.ClusterId, lastTs,
                         d => d["path"] = parentKey);
-                    AddEdge(parentNodeId, procNodeId, GraphEdgeType.Spawned, 0.85, "SPAWNED");
+                    if (upstreamAnchorId is not null)
+                        AddEdge(upstreamAnchorId, parentNodeId, GraphEdgeType.InvolvedIn, 0.7, "exécute");
+                    upstreamAnchorId = parentNodeId;
                 }
+
+                var normProc = procKey.Trim().Replace('/', '\\').ToLowerInvariant();
+                var procLabel = !string.IsNullOrWhiteSpace(procName) ? procName : Path.GetFileName(procKey);
+                var procNodeId = $"process:{normProc}";
+                UpsertNode(procNodeId, GraphNodeType.Process, string.IsNullOrWhiteSpace(procLabel) ? Truncate(procKey, 28) : procLabel, representative.Score, rank: 2, representative.ClusterId, lastTs, d =>
+                {
+                    d["path"] = procKey;
+                    if (GetAttr(attrs, AttributeKeys.ProcessId) is { } pid) d["pid"] = pid;
+                    if (GetAttr(attrs, AttributeKeys.Sha256) is { } sha) d["sha256"] = sha;
+                    if (GetAttr(attrs, AttributeKeys.Signed) is { } signed) d["signed"] = signed;
+                });
+
+                if (upstreamAnchorId is not null)
+                {
+                    var isParentProc = upstreamAnchorId.StartsWith("process:", StringComparison.OrdinalIgnoreCase);
+                    AddEdge(upstreamAnchorId, procNodeId, isParentProc ? GraphEdgeType.Spawned : GraphEdgeType.InvolvedIn, 0.85, isParentProc ? "lance" : "exécute");
+                }
+                upstreamAnchorId = procNodeId;
             }
 
-            // File
+            // Relie la branche amont vers le nœud Événement (flux direct)
+            if (upstreamAnchorId is not null)
+            {
+                AddEdge(upstreamAnchorId, eventNodeId, GraphEdgeType.InvolvedIn, 0.85, "déclenche");
+            }
+
+            // Niveau 4 : Cibles aval de l'événement (Fichier, Domaine, IP)
+            string? downstreamLeafId = eventNodeId;
+
             var filePath = GetAttr(attrs, AttributeKeys.FilePath)
                            ?? GetAttr(attrs, AttributeKeys.FileName)
-                           ?? (e.Category == (int)EventCategory.File ? e.Subject : null);
+                           ?? (representative.Category is (int)EventCategory.File or (int)EventCategory.Canary ? representative.Subject : null);
             if (!string.IsNullOrWhiteSpace(filePath))
             {
                 var normFile = filePath.Trim().Replace('/', '\\').ToLowerInvariant();
                 var fileNodeId = $"file:{normFile}";
                 var fileLabel = Path.GetFileName(filePath);
-                UpsertNode(fileNodeId, GraphNodeType.File, string.IsNullOrWhiteSpace(fileLabel) ? filePath : fileLabel, e.Score, e.ClusterId, e.Timestamp, d =>
+                UpsertNode(fileNodeId, GraphNodeType.File, string.IsNullOrWhiteSpace(fileLabel) ? Truncate(filePath, 28) : fileLabel, representative.Score, rank: 4, representative.ClusterId, lastTs, d =>
                 {
                     d["path"] = filePath;
                     if (GetAttr(attrs, AttributeKeys.Sha256) is { } sha) d["sha256"] = sha;
                     if (GetAttr(attrs, AttributeKeys.Entropy) is { } ent) d["entropy"] = ent;
                 });
-                AddEdge(eventNodeId, fileNodeId, GraphEdgeType.Wrote, 0.8, "WROTE");
-                if (procNodeId is not null)
-                    AddEdge(procNodeId, fileNodeId, GraphEdgeType.Wrote, 0.75, "WROTE");
+                AddEdge(eventNodeId, fileNodeId, GraphEdgeType.Wrote, 0.85, "modifie");
+                downstreamLeafId = fileNodeId;
             }
 
-            // Domain
             var domain = GetAttr(attrs, AttributeKeys.Domain)
                          ?? ActionPolicyHelper.TryExtractDomain(GetAttr(attrs, AttributeKeys.Url))
-                         ?? (e.Category is (int)EventCategory.Browser or (int)EventCategory.Clipboard or (int)EventCategory.Network
-                             ? ActionPolicyHelper.TryExtractDomain(e.Subject)
+                         ?? (representative.Category is (int)EventCategory.Browser or (int)EventCategory.Clipboard or (int)EventCategory.Network
+                             ? ActionPolicyHelper.TryExtractDomain(representative.Subject)
                              : null);
             if (!string.IsNullOrWhiteSpace(domain))
             {
                 var normDom = domain.Trim().ToLowerInvariant();
                 var domNodeId = $"domain:{normDom}";
-                UpsertNode(domNodeId, GraphNodeType.Domain, normDom, e.Score, e.ClusterId, e.Timestamp, d =>
+                UpsertNode(domNodeId, GraphNodeType.Domain, normDom, representative.Score, rank: 4, representative.ClusterId, lastTs, d =>
                 {
                     d["domain"] = normDom;
                     if (GetAttr(attrs, AttributeKeys.Url) is { } url) d["url"] = url;
                 });
 
-                var edgeType = (EventCategory)e.Category switch
+                var (edgeType, verb) = (EventCategory)representative.Category switch
                 {
-                    EventCategory.Clipboard => GraphEdgeType.CopiedFromClipboard,
-                    EventCategory.Browser => GraphEdgeType.OpenedUrl,
-                    EventCategory.Network => GraphEdgeType.ConnectedTo,
-                    _ => GraphEdgeType.SameDomain
+                    EventCategory.Clipboard => (GraphEdgeType.CopiedFromClipboard, "copie URL"),
+                    EventCategory.Browser => (GraphEdgeType.OpenedUrl, "visite"),
+                    EventCategory.Network => (GraphEdgeType.ConnectedTo, "résout DNS"),
+                    _ => (GraphEdgeType.SameDomain, "cible")
                 };
-                AddEdge(eventNodeId, domNodeId, edgeType, 0.85, edgeType.ToString());
-                if (procNodeId is not null)
-                    AddEdge(procNodeId, domNodeId, GraphEdgeType.ConnectedTo, 0.75, "CONNECTED_TO");
+                AddEdge(eventNodeId, domNodeId, edgeType, 0.85, verb);
+                downstreamLeafId = domNodeId;
             }
 
-            // IP
             var ip = GetAttr(attrs, AttributeKeys.RemoteIp) ?? GetAttr(attrs, AttributeKeys.SourceIp);
             if (!string.IsNullOrWhiteSpace(ip))
             {
                 var normIp = ip.Trim();
+                var portSuffix = GetAttr(attrs, AttributeKeys.RemotePort) is { } rp ? $":{rp}" : string.Empty;
                 var ipNodeId = $"ip:{normIp}";
-                UpsertNode(ipNodeId, GraphNodeType.Ip, normIp, e.Score, e.ClusterId, e.Timestamp, d =>
+                UpsertNode(ipNodeId, GraphNodeType.Ip, normIp + portSuffix, representative.Score, rank: 4, representative.ClusterId, lastTs, d =>
                 {
                     d["ip"] = normIp;
                     if (GetAttr(attrs, AttributeKeys.RemotePort) is { } port) d["port"] = port;
                 });
-                AddEdge(eventNodeId, ipNodeId, GraphEdgeType.ConnectedTo, 0.8, "CONNECTED_TO");
-                if (procNodeId is not null)
-                    AddEdge(procNodeId, ipNodeId, GraphEdgeType.ConnectedTo, 0.8, "CONNECTED_TO");
+                AddEdge(downstreamLeafId != eventNodeId && downstreamLeafId!.StartsWith("domain:", StringComparison.Ordinal) ? downstreamLeafId : eventNodeId,
+                    ipNodeId, GraphEdgeType.ConnectedTo, 0.88, "connecte");
+                downstreamLeafId = ipNodeId;
             }
 
-            // Device
-            var devId = GetAttr(attrs, AttributeKeys.DeviceId) ?? (e.Category == (int)EventCategory.Device ? e.Subject : null);
-            if (!string.IsNullOrWhiteSpace(devId))
-            {
-                var normDev = devId.Trim().ToLowerInvariant();
-                var devNodeId = $"device:{normDev}";
-                var devLabel = GetAttr(attrs, AttributeKeys.DeviceName) ?? devId;
-                UpsertNode(devNodeId, GraphNodeType.Device, devLabel, e.Score, e.ClusterId, e.Timestamp, d =>
-                {
-                    d["deviceId"] = devId;
-                    if (GetAttr(attrs, AttributeKeys.DeviceClass) is { } cls) d["class"] = cls;
-                    if (GetAttr(attrs, AttributeKeys.VendorId) is { } vid) d["vid"] = vid;
-                    if (GetAttr(attrs, AttributeKeys.ProductId) is { } pid) d["pid"] = pid;
-                });
-                AddEdge(eventNodeId, devNodeId, GraphEdgeType.InvolvedIn, 0.8, "device");
-            }
+            representative.AttributesJson = downstreamLeafId; // mémorisation temporaire du nœud aval pour liaison au cluster
+            grp.Key.ToString();
         }
 
-        // 2. Nœuds Menace (Clusters) + arêtes ClusterLinks + arêtes Sequence
-        var eventsByCluster = events
-            .Where(e => e.ClusterId.HasValue)
-            .GroupBy(e => e.ClusterId!.Value)
-            .ToDictionary(g => g.Key, g => g.OrderBy(e => e.TimestampUnixMs).ToList());
-
+        // Niveau 5 : Nœuds Menace / Alerte corrélée + Flux indirects de corrélation entre étapes distinctes
         foreach (var cluster in clusters)
         {
             var threatNodeId = $"threat:{cluster.Id:D}";
+            var clusterMitre = DeserializeList(cluster.MitreTechniquesJson);
             var label = !string.IsNullOrWhiteSpace(cluster.ChainName)
                 ? cluster.ChainName
                 : $"{ActionPolicyHelper.ThreatTypeLabel(cluster.DominantType)} ({cluster.Score}/100)";
 
-            UpsertNode(threatNodeId, GraphNodeType.Threat, label, cluster.Score, cluster.Id, cluster.LastSeen, d =>
+            UpsertNode(threatNodeId, GraphNodeType.Threat, label, cluster.Score, rank: 5, cluster.Id, cluster.LastSeen, d =>
             {
                 d["clusterId"] = cluster.Id.ToString("D");
                 d["dominantType"] = cluster.DominantType.ToString();
                 d["eventCount"] = cluster.EventCount.ToString();
                 d["escalated"] = cluster.Escalated ? "true" : "false";
                 if (!string.IsNullOrWhiteSpace(cluster.ChainName)) d["chainName"] = cluster.ChainName;
+                if (clusterMitre.Count > 0) d["mitre"] = string.Join(",", clusterMitre);
                 d["justification"] = Truncate(cluster.Justification, 260);
             });
 
-            // Arêtes de corrélation persistées entre événements
-            var directPairs = new HashSet<(Guid, Guid)>();
-            foreach (var link in cluster.Links)
-            {
-                if (!includedEventIds.Contains(link.FromEventId) || !includedEventIds.Contains(link.ToEventId))
-                    continue;
+            // Relie les étapes dédupliquées du cluster dans l'ordre chronologique (flux indirects de corrélation)
+            var distinctAggNodes = events
+                .Where(e => e.ClusterId == cluster.Id && rawEventIdToAggNodeId.ContainsKey(e.Id))
+                .OrderBy(e => e.TimestampUnixMs)
+                .Select(e => (AggId: rawEventIdToAggNodeId[e.Id], LeafId: e.AttributesJson ?? rawEventIdToAggNodeId[e.Id]))
+                .DistinctBy(x => x.AggId)
+                .ToList();
 
-                AddEdge(
-                    $"event:{link.FromEventId:D}",
-                    $"event:{link.ToEventId:D}",
-                    (GraphEdgeType)link.EdgeType,
-                    link.Weight,
-                    link.Key);
-                directPairs.Add((link.FromEventId, link.ToEventId));
-                directPairs.Add((link.ToEventId, link.FromEventId));
+            for (var i = 0; i < distinctAggNodes.Count; i++)
+            {
+                var step = distinctAggNodes[i];
+                var sourceForThreat = !string.IsNullOrWhiteSpace(step.LeafId) && nodes.ContainsKey(step.LeafId)
+                    ? step.LeafId
+                    : step.AggId;
+                AddEdge(sourceForThreat, threatNodeId, GraphEdgeType.InvolvedIn, 0.9, "corrélé → alerte");
+
+                if (i > 0)
+                {
+                    var prevAgg = distinctAggNodes[i - 1].AggId;
+                    AddEdge(prevAgg, step.AggId, GraphEdgeType.Sequence, 0.55, $"étape {i}→{i + 1}");
+                }
             }
 
-            if (eventsByCluster.TryGetValue(cluster.Id, out var clusterEvts))
+            // Liens explicites persistés entre groupes d'événements distincts
+            foreach (var link in cluster.Links)
             {
-                for (var i = 0; i < clusterEvts.Count; i++)
+                if (!rawEventIdToAggNodeId.TryGetValue(link.FromEventId, out var fromAgg) ||
+                    !rawEventIdToAggNodeId.TryGetValue(link.ToEventId, out var toAgg) ||
+                    string.Equals(fromAgg, toAgg, StringComparison.OrdinalIgnoreCase))
                 {
-                    var cur = clusterEvts[i];
-                    AddEdge($"event:{cur.Id:D}", threatNodeId, GraphEdgeType.InvolvedIn, 0.9, "cluster");
-
-                    if (i > 0)
-                    {
-                        var prev = clusterEvts[i - 1];
-                        if (!directPairs.Contains((prev.Id, cur.Id)))
-                        {
-                            AddEdge($"event:{prev.Id:D}", $"event:{cur.Id:D}", GraphEdgeType.Sequence, 0.4, "SEQUENCE");
-                        }
-                    }
+                    continue;
                 }
+
+                AddEdge(fromAgg, toAgg, (GraphEdgeType)link.EdgeType, link.Weight, Truncate(link.Key, 24));
             }
         }
 
@@ -410,6 +466,13 @@ public sealed class GraphBuilderService
         }
     }
 
+    private static List<string> DeserializeList(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try { return SentinelJson.Deserialize<List<string>>(json) ?? []; }
+        catch { return []; }
+    }
+
     private static string Truncate(string? value, int maxLen)
     {
         if (string.IsNullOrEmpty(value)) return string.Empty;
@@ -421,6 +484,7 @@ public sealed class GraphBuilderService
         GraphNodeType type,
         string label,
         int score,
+        int rank,
         Guid? clusterId,
         DateTimeOffset? timestamp)
     {
@@ -428,6 +492,7 @@ public sealed class GraphBuilderService
         public GraphNodeType Type { get; } = type;
         public string Label { get; } = label;
         public int Score { get; set; } = score;
+        public int Rank { get; } = rank;
         public Guid? ClusterId { get; set; } = clusterId;
         public DateTimeOffset? Timestamp { get; set; } = timestamp;
         public Dictionary<string, string> Data { get; } = new(StringComparer.OrdinalIgnoreCase);

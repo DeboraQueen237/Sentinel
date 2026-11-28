@@ -162,6 +162,8 @@ builder.Services.AddSingleton<DashboardService>();
 builder.Services.AddSingleton<GraphBuilderService>();
 builder.Services.AddSingleton<EntityProfileService>();
 builder.Services.AddSingleton<ReportGeneratorService>();
+builder.Services.AddSingleton<SystemScanAndAuditService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemScanAndAuditService>());
 
 // Services hébergés : initialisation synchrone puis maintenance périodique
 builder.Services.AddHostedService<StartupInitializationService>();

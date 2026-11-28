@@ -53,14 +53,14 @@ public sealed class LlmSettings
     public string EmbeddingModel { get; set; } = "nomic-embed-text";
     public int TimeoutSeconds { get; set; } = 45;
     /// <summary>Le LLM n'est appelé que si le score des règles est dans cette bande « ambiguë » (doc §7.1).</summary>
-    public int AmbiguityLow { get; set; } = 25;
-    public int AmbiguityHigh { get; set; } = 80;
+    public int AmbiguityLow { get; set; } = 15;
+    public int AmbiguityHigh { get; set; } = 88;
     /// <summary>Confiance minimale pour retenir l'avis du LLM.</summary>
     public double MinConfidence { get; set; } = 0.5;
     /// <summary>Nombre max d'appels LLM simultanés.</summary>
     public int MaxConcurrency { get; set; } = 1;
     /// <summary>Durée de maintien du modèle en RAM/VRAM par Ollama (ex. "10m", "30m").</summary>
-    public string KeepAlive { get; set; } = "10m";
+    public string KeepAlive { get; set; } = "15m";
     /// <summary>Taille de fenêtre de contexte Ollama (num_ctx) optimisée pour faible latence locale.</summary>
     public int ContextWindow { get; set; } = 2048;
     /// <summary>Nombre maximal de tokens générés (num_predict) pour une sortie JSON concise et rapide.</summary>
@@ -71,16 +71,21 @@ public sealed class LlmSettings
     public int CacheTtlMinutes { get; set; } = 5;
     /// <summary>Précharge le modèle sélectionné au démarrage du serveur pour éliminer la latence à froid.</summary>
     public bool WarmUpOnStartup { get; set; } = true;
+    /// <summary>Enrichit automatiquement en tâche de fond les alertes Élevées/Critiques avec un diagnostic et plan d'action IA Qwen.</summary>
+    public bool AutoAnalyzeHighAlerts { get; set; } = true;
 }
 
 /// <summary>
-/// Paramètres de notifications externes administrateur par niveau de criticité (opt-in strict, métadonnées uniquement).
-/// Les secrets (mot de passe SMTP, jetons WhatsApp/Telegram, clé HMAC) ne sont JAMAIS stockés ici :
-/// ils sont chiffrés au repos via DPAPI dans <c>SentinelPaths.NotificationSecretsFile</c>.
+/// Paramètres de notifications administrateur par niveau de criticité (In-App temps réel actif par défaut ;
+/// Email, SMS, WhatsApp et Webhook strictement opt-in, métadonnées uniquement, secrets chiffrés DPAPI).
 /// </summary>
 public sealed class NotificationSettings
 {
     public bool Enabled { get; set; } = false;
+    /// <summary>Notifications temps réel directement dans la console web (cloche + centre de notifications + son optionnel). Activé par défaut.</summary>
+    public bool EnableInApp { get; set; } = true;
+    public ThreatLevel InAppMinLevel { get; set; } = ThreatLevel.Moderate;
+    public bool EnableSoundOnCritical { get; set; } = true;
     /// <summary>Délai anti-spam (minutes) entre deux notifications identiques sur un même canal ; contourné immédiatement en cas d'escalade de criticité.</summary>
     public int CooldownMinutes { get; set; } = 5;
     /// <summary>Envoie également une notification lorsqu'un cluster corrélé atteint ou dépasse le niveau minimal configuré.</summary>
@@ -89,8 +94,23 @@ public sealed class NotificationSettings
     public string DashboardBaseUrl { get; set; } = "http://127.0.0.1:5200";
 
     public EmailNotificationSettings Email { get; set; } = new();
+    public SmsNotificationSettings Sms { get; set; } = new();
     public WhatsAppNotificationSettings WhatsApp { get; set; } = new();
     public WebhookNotificationSettings Webhook { get; set; } = new();
+}
+
+public sealed class SmsNotificationSettings
+{
+    public bool Enabled { get; set; } = false;
+    public ThreatLevel MinLevel { get; set; } = ThreatLevel.Critical;
+    /// <summary>Fournisseur SMS : "TwilioSms" ou "HttpGateway" (compatible passerelles HTTP locales/opérateurs ex. Orange, Africa's Talking, OVH, Vonage).</summary>
+    public string Provider { get; set; } = "TwilioSms";
+    public string AccountSid { get; set; } = string.Empty;
+    public string FromNumber { get; set; } = string.Empty;
+    /// <summary>URL HTTPS de la passerelle SMS lorsque Provider = "HttpGateway".</summary>
+    public string GatewayUrl { get; set; } = string.Empty;
+    /// <summary>Numéros destinataires administrateurs au format international E.164 (ex. +2376XXXXXXXX).</summary>
+    public List<string> Recipients { get; set; } = new();
 }
 
 public sealed class EmailNotificationSettings

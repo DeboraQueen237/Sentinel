@@ -13,6 +13,7 @@ Ce guide explique comment démarrer **SENTINEL**, accéder à la console d'admin
   ollama pull qwen2.5-coder:3b
   ```
   > Si Ollama est arrêté ou lent sur CPU, SENTINEL bascule automatiquement sur ses moteurs déterministes (règles + Sigma + YARA/PE + Threat Intel + corrélation Markov).
+> **Nouveau en v2.2.0** : pour le scénario complet de soutenance en direct devant un jury, consultez [presentation-et-demo.md](presentation-et-demo.md). Si vos services Windows installés affichaient encore `v1.0.0`, exécutez `.\scripts\upgrade-installed-services.ps1` pour les mettre à niveau sur place vers `v2.2.0`.
 
 ---
 

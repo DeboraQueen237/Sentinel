@@ -126,6 +126,12 @@ public sealed class SentinelApiClient
     public Task<AlertDto> ResolveAlertAsync(Guid id, string? comment = null, CancellationToken ct = default) =>
         SendAsync<AlertDto>(HttpMethod.Post, ApiRoutes.Fill(ApiRoutes.AlertResolve, id), new AlertDecisionRequest(comment), true, ct);
 
+    public Task<AiIncidentAnalysisDto> AnalyzeAlertWithAiAsync(Guid id, CancellationToken ct = default) =>
+        SendAsync<AiIncidentAnalysisDto>(HttpMethod.Post, ApiRoutes.Fill(ApiRoutes.AlertAiAnalyze, id), null, true, ct);
+
+    public Task<PurgeDuplicatesResultDto> PurgeDuplicateAlertsAsync(CancellationToken ct = default) =>
+        SendAsync<PurgeDuplicatesResultDto>(HttpMethod.Post, ApiRoutes.AlertsPurgeDuplicates, null, true, ct);
+
     // ------------------------------------------------------------------------- Événements
     public Task<PagedResult<EventDto>> GetEventsAsync(
         EventCategory? category = null,
@@ -175,6 +181,9 @@ public sealed class SentinelApiClient
 
     public Task<ClusterDto> GetClusterByIdAsync(Guid id, CancellationToken ct = default) =>
         SendAsync<ClusterDto>(HttpMethod.Get, ApiRoutes.Fill(ApiRoutes.ClusterById, id), null, true, ct);
+
+    public Task<AiIncidentAnalysisDto> AnalyzeClusterWithAiAsync(Guid id, CancellationToken ct = default) =>
+        SendAsync<AiIncidentAnalysisDto>(HttpMethod.Post, ApiRoutes.Fill(ApiRoutes.ClusterAiAnalyze, id), null, true, ct);
 
     public Task<GraphDto> GetGraphAsync(
         DateTimeOffset? from = null,
@@ -319,9 +328,37 @@ public sealed class SentinelApiClient
     public Task<LlmStatusDto> AutoSelectLlmModelAsync(CancellationToken ct = default) =>
         SendAsync<LlmStatusDto>(HttpMethod.Post, ApiRoutes.LlmSelectBest, null, true, ct);
 
-    // ------------------------------------------------------------------------- Notifications externes administrateur (v2.1)
+    // ------------------------------------------------------------------------- Scan général, Audit sécurité & Démo (v2.2)
+    public Task<SystemScanReportDto> RunGeneralSystemScanAsync(bool ingestAnomalies = true, bool includeAiSummary = true, CancellationToken ct = default) =>
+        SendAsync<SystemScanReportDto>(HttpMethod.Post, ApiRoutes.SystemScan, new SystemScanRequest(ingestAnomalies, includeAiSummary), true, ct);
+
+    public async Task<SystemScanReportDto?> GetLastSystemScanAsync(CancellationToken ct = default)
+    {
+        try { return await SendAsync<SystemScanReportDto?>(HttpMethod.Get, ApiRoutes.SystemScanLast, null, true, ct); }
+        catch { return null; }
+    }
+
+    public Task<SecurityAuditReportDto> RunSystemSecurityAuditAsync(CancellationToken ct = default) =>
+        SendAsync<SecurityAuditReportDto>(HttpMethod.Post, ApiRoutes.SystemSecurityAudit, null, true, ct);
+
+    public async Task<SecurityAuditReportDto?> GetLastSystemSecurityAuditAsync(CancellationToken ct = default)
+    {
+        try { return await SendAsync<SecurityAuditReportDto?>(HttpMethod.Get, ApiRoutes.SystemSecurityAuditLast, null, true, ct); }
+        catch { return null; }
+    }
+
+    public Task<DemoScenarioResultDto> RunDemoScenarioAsync(string scenarioId, CancellationToken ct = default) =>
+        SendAsync<DemoScenarioResultDto>(HttpMethod.Post, ApiRoutes.DemoRun, new DemoRunRequest(scenarioId), true, ct);
+
+    // ------------------------------------------------------------------------- Notifications externes & In-App (v2.2)
     public Task<NotificationStatusDto> GetNotificationStatusAsync(CancellationToken ct = default) =>
         SendAsync<NotificationStatusDto>(HttpMethod.Get, ApiRoutes.NotificationStatus, null, true, ct);
+
+    public Task<IReadOnlyList<InAppNotificationDto>> GetNotificationInboxAsync(CancellationToken ct = default) =>
+        SendAsync<IReadOnlyList<InAppNotificationDto>>(HttpMethod.Get, ApiRoutes.NotificationInbox, null, true, ct);
+
+    public async Task MarkNotificationsReadAsync(CancellationToken ct = default) =>
+        await SendNoContentAsync(HttpMethod.Post, ApiRoutes.NotificationInboxReadAll, null, true, ct);
 
     public Task<NotificationDeliveryDto> TestNotificationAsync(string channel, CancellationToken ct = default) =>
         SendAsync<NotificationDeliveryDto>(HttpMethod.Post, ApiRoutes.NotificationTest, new NotificationTestRequest(channel), true, ct);

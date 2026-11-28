@@ -52,6 +52,9 @@ public sealed class LiveBroadcaster
     public Task SettingsChangedAsync(SentinelSettings settings, CancellationToken ct = default) =>
         SafeSendAsync(LiveHub.SettingsChanged, settings, ct);
 
+    public Task NotificationPushedAsync(InAppNotificationDto dto, CancellationToken ct = default) =>
+        SafeSendAsync(LiveHub.NotificationPushed, dto, ct);
+
     /// <summary>
     /// Déclenche une diffusion coalescée et bridée (≤ 1 / 2 s) du résumé du tableau de bord.
     /// </summary>

@@ -414,7 +414,8 @@ public sealed record NotificationSecretsStatusDto(
     bool HasSmtpPassword,
     bool HasWhatsAppToken,
     bool HasWebhookSecret,
-    string StorageMode);
+    string StorageMode,
+    bool HasSmsToken = false);
 
 public sealed record NotificationSecretsRequest(
     string? SmtpPassword = null,
@@ -422,7 +423,9 @@ public sealed record NotificationSecretsRequest(
     string? WebhookSecret = null,
     bool ClearSmtpPassword = false,
     bool ClearWhatsAppToken = false,
-    bool ClearWebhookSecret = false);
+    bool ClearWebhookSecret = false,
+    string? SmsApiToken = null,
+    bool ClearSmsToken = false);
 
 public sealed record NotificationTestRequest(string Channel);
 
@@ -438,6 +441,18 @@ public sealed record NotificationDeliveryDto(
     string? Error,
     int Attempts,
     double ElapsedMs);
+
+public sealed record InAppNotificationDto(
+    Guid Id,
+    DateTimeOffset Timestamp,
+    ThreatLevel Level,
+    int Score,
+    string TriggerKind,
+    string Title,
+    string Message,
+    string HostId,
+    string? TargetUrl,
+    bool IsRead);
 
 public sealed record NotificationStatusDto(
     bool GlobalEnabled,
@@ -456,4 +471,88 @@ public sealed record NotificationStatusDto(
     long TotalFailed,
     long SuppressedByCooldown,
     NotificationSecretsStatusDto Secrets,
-    IReadOnlyList<NotificationDeliveryDto> RecentDeliveries);
+    IReadOnlyList<NotificationDeliveryDto> RecentDeliveries,
+    bool InAppEnabled = true,
+    ThreatLevel InAppMinLevel = ThreatLevel.Moderate,
+    int UnreadInAppCount = 0,
+    bool SmsEnabled = false,
+    ThreatLevel SmsMinLevel = ThreatLevel.Critical,
+    string SmsProvider = "TwilioSms");
+
+// ----------------------------------------------------------------------------- Extensions v2.2 (Diagnostic IA SOC, Scan système général, Audit sécurité & Démo)
+public sealed record AiIncidentAnalysisDto(
+    string TargetId,
+    DateTimeOffset GeneratedAt,
+    bool AiUsed,
+    string ModelUsed,
+    string ExecutiveSummary,
+    string RootCauseHypothesis,
+    IReadOnlyList<string> ImmediateActions,
+    IReadOnlyList<string> HardeningSteps,
+    double Confidence,
+    double LatencyMs);
+
+public sealed record SystemScanRequest(bool IngestAnomalies = true, bool IncludeAiSummary = true);
+
+public sealed record SystemScanFindingDto(
+    string Area,
+    ThreatLevel Severity,
+    int Score,
+    string Title,
+    string Subject,
+    string Details,
+    string Recommendation,
+    IReadOnlyList<string> MitreTechniques,
+    bool IngestedAsEvent);
+
+public sealed record SystemScanReportDto(
+    Guid ScanId,
+    DateTimeOffset StartedAt,
+    DateTimeOffset CompletedAt,
+    double DurationMs,
+    string HostName,
+    int ProcessesInspected,
+    int ConnectionsInspected,
+    int PersistenceEntriesInspected,
+    int FilesScanned,
+    int CanariesChecked,
+    int AnomaliesFound,
+    int EventsIngested,
+    string? AiExecutiveSummary,
+    IReadOnlyList<SystemScanFindingDto> Findings);
+
+public sealed record SecurityAuditCheckDto(
+    string Id,
+    string Category,
+    string Title,
+    string Status,
+    int Weight,
+    string CurrentState,
+    string Recommendation);
+
+public sealed record SecurityAuditReportDto(
+    Guid AuditId,
+    DateTimeOffset GeneratedAt,
+    double DurationMs,
+    string HostName,
+    int PostureScore,
+    int PassedCount,
+    int WarningCount,
+    int CriticalCount,
+    bool HashChainValid,
+    string? AiActionPlan,
+    IReadOnlyList<SecurityAuditCheckDto> Checks);
+
+public sealed record DemoRunRequest(string ScenarioId);
+
+public sealed record DemoScenarioResultDto(
+    string ScenarioId,
+    string Title,
+    int EventsInjected,
+    int AlertsGenerated,
+    Guid? PrimaryClusterId,
+    Guid? PrimaryAlertId,
+    string Summary,
+    double ElapsedMs);
+
+public sealed record PurgeDuplicatesResultDto(int AlertsResolved, int RemainingOpenAlerts);

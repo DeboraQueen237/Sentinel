@@ -82,12 +82,36 @@ window.sentinelUtils = (() => {
         }
     }
 
+    function playAlertChime(isCritical) {
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            const ctx = new AudioCtx();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(isCritical ? 880 : 660, ctx.currentTime);
+            if (isCritical) {
+                osc.frequency.setValueAtTime(1046, ctx.currentTime + 0.11);
+            }
+            gain.gain.setValueAtTime(0.08, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.28);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start();
+            osc.stop(ctx.currentTime + 0.3);
+        } catch {
+            // Audio bloqué avant interaction utilisateur
+        }
+    }
+
     return {
         getTheme,
         setTheme,
         toggleTheme,
         downloadBase64File,
         downloadDataUrl,
-        copyText
+        copyText,
+        playAlertChime
     };
 })();

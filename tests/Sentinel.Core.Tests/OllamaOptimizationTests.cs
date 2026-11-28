@@ -81,6 +81,26 @@ public sealed class OllamaOptimizationTests
     }
 
     [Fact]
+    public void ModelSelector_OnCpuOnlyHost_PrefersFast3BQwenOver9BQwen()
+    {
+        var installed = new List<OllamaInstalledModel>
+        {
+            new("qwen3.5:latest", 6_550_000_000, "qwen3", "9.0B", "Q4_K_M"),
+            new("qwen2.5-coder:7b", 4_680_000_000, "qwen2", "7.6B", "Q4_K_M"),
+            new("qwen2.5-coder:3b", 1_930_000_000, "qwen2", "3.1B", "Q4_K_M")
+        };
+
+        // Sans GPU dédié (hasDedicatedGpu: false), qwen2.5-coder:3b gagne pour éviter les timeouts CPU de 70 s
+        var cpuChoice = OllamaModelSelector.SelectBestModel(installed, "qwen2.5:7b", autoSelectBestQwen: true, hostRamGb: 15.9, hasDedicatedGpu: false);
+        cpuChoice.SelectedModel.Should().Be("qwen2.5-coder:3b");
+        cpuChoice.IsQwen.Should().BeTrue();
+
+        // Avec GPU dédié (hasDedicatedGpu: true), qwen3.5:latest gagne
+        var gpuChoice = OllamaModelSelector.SelectBestModel(installed, "qwen2.5:7b", autoSelectBestQwen: true, hostRamGb: 15.9, hasDedicatedGpu: true);
+        gpuChoice.SelectedModel.Should().Be("qwen3.5:latest");
+    }
+
+    [Fact]
     public async Task OllamaAssessor_AutoSelectsBestQwen_SendsOptimizedOptions_WarmsUp_AndUsesSemanticCache()
     {
         var clock = new FakeTimeProvider(TestEvents.BaseTime);

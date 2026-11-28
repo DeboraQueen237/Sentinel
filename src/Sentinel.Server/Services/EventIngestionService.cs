@@ -26,6 +26,8 @@ public sealed class EventIngestionService : IDisposable
     private readonly IAlertNotificationDispatcher? _notifications;
     private readonly ILogger<EventIngestionService> _logger;
     private readonly SemaphoreSlim _stateLock = new(1, 1);
+    private readonly object _dedupGate = new();
+    private readonly Dictionary<string, DateTimeOffset> _recentSystemEvents = new(StringComparer.OrdinalIgnoreCase);
 
     public EventIngestionService(
         IThreatPipeline pipeline,
@@ -59,15 +61,28 @@ public sealed class EventIngestionService : IDisposable
         ArgumentNullException.ThrowIfNull(events);
 
         var normalized = new List<SecurityEvent>();
+        PipelineResult? lastSkippedDummy = null;
         foreach (var raw in events)
         {
             if (raw is null) continue;
             var evt = NormalizeEvent(raw);
+            if (ShouldSuppressDuplicateSystemBurst(evt))
+            {
+                lastSkippedDummy ??= new PipelineResult
+                {
+                    Scored = new ScoredEvent(evt, new ThreatAssessment(evt.Id, 0, ThreatType.None, "Doublon système absorbé (anti-tempête).", AssessmentSource.Rules, 1.0)),
+                    Decision = null,
+                    Cluster = null,
+                    ElapsedMs = 0,
+                    LlmUsed = false
+                };
+                continue;
+            }
             normalized.Add(evt);
         }
 
         if (normalized.Count == 0)
-            return Array.Empty<PipelineResult>();
+            return lastSkippedDummy is not null ? [lastSkippedDummy] : Array.Empty<PipelineResult>();
 
         // 1. Exécution séquentielle dans le pipeline (préserve l'ordre causal pour la corrélation)
         var results = new List<PipelineResult>(normalized.Count);
@@ -209,6 +224,33 @@ public sealed class EventIngestionService : IDisposable
         }
 
         return results;
+    }
+
+    private bool ShouldSuppressDuplicateSystemBurst(SecurityEvent evt)
+    {
+        if (evt.Category != EventCategory.System ||
+            !string.Equals(evt.EventType, EventTypes.AgentTampering, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var key = $"{evt.HostId}|{evt.EventType}|{evt.Subject}";
+        var now = evt.Timestamp == default ? DateTimeOffset.UtcNow : evt.Timestamp;
+        lock (_dedupGate)
+        {
+            if (_recentSystemEvents.TryGetValue(key, out var prev) &&
+                (now - prev).Duration() < TimeSpan.FromMinutes(3))
+            {
+                return true;
+            }
+            _recentSystemEvents[key] = now;
+            if (_recentSystemEvents.Count > 256)
+            {
+                _recentSystemEvents.Clear();
+                _recentSystemEvents[key] = now;
+            }
+            return false;
+        }
     }
 
     private static SecurityEvent NormalizeEvent(SecurityEvent evt)

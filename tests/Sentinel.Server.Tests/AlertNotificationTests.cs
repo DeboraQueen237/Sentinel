@@ -380,6 +380,88 @@ public sealed class AlertNotificationTests
         auditTexts.Should().NotContain(d => d.Contains("SECRET_SMTP_DO_NOT_LEAK") || d.Contains("SECRET_WA_DO_NOT_LEAK"));
     }
 
+    [Fact]
+    public async Task V22_InAppInbox_SmsGateway_SystemScan_SecurityAudit_DemoTreeGraph_AndAiAnalysis_WorkEndToEnd()
+    {
+        var smtp = new RecordingSmtpTransport();
+        var httpCapture = new RecordingHttpHandler();
+        var (svc, tmpDir) = CreateService(smtp, httpCapture);
+
+        try
+        {
+            // 1. Test SMS HttpGateway + In-App Inbox
+            svc.UpdateSettings(new NotificationSettings
+            {
+                Enabled = true,
+                EnableInApp = true,
+                InAppMinLevel = ThreatLevel.Moderate,
+                Sms = new SmsNotificationSettings
+                {
+                    Enabled = true,
+                    MinLevel = ThreatLevel.Critical,
+                    Provider = "HttpGateway",
+                    GatewayUrl = "https://sms-gateway.local.test/api/send",
+                    Recipients = ["+237699001122"]
+                }
+            });
+
+            var inAppRes = await svc.SendTestAsync("inapp");
+            inAppRes.Success.Should().BeTrue();
+            svc.GetInbox().Should().HaveCount(1);
+            svc.MarkAllRead().Should().Be(1);
+            svc.GetStatus().UnreadInAppCount.Should().Be(0);
+
+            var smsRes = await svc.SendTestAsync("sms");
+            smsRes.Success.Should().BeTrue();
+            httpCapture.Requests.Last().Uri.Should().Be("https://sms-gateway.local.test/api/send");
+            using (var smsDoc = System.Text.Json.JsonDocument.Parse(httpCapture.Requests.Last().Body))
+            {
+                smsDoc.RootElement.GetProperty("to").GetString().Should().Be("+237699001122");
+                smsDoc.RootElement.GetProperty("from").GetString().Should().Be("SENTINEL");
+            }
+        }
+        finally
+        {
+            CleanupDir(tmpDir);
+        }
+
+        // 2. Test End-to-End API v2.2 : Démo -> Arbre causal dédupliqué -> Analyse IA -> Scan Système -> Audit Posture
+        using var factory = new SentinelServerFactory();
+        var (client, _, _) = await factory.CreateAuthenticatedClientAsync();
+
+        var demoResp = await client.PostAsJsonAsync(ApiRoutes.DemoRun, new DemoRunRequest("phishing-chain"), SentinelJson.Options);
+        demoResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var demo = await demoResp.Content.ReadFromJsonAsync<DemoScenarioResultDto>(SentinelJson.Options);
+        demo.Should().NotBeNull();
+        demo!.EventsInjected.Should().BeGreaterThanOrEqualTo(4);
+        demo.PrimaryAlertId.Should().NotBeNull();
+
+        // L'arbre causal contient une racine Host (rank=0) et des nœuds hiérarchisés
+        var graph = await client.GetFromJsonAsync<GraphDto>($"{ApiRoutes.Graph}?minScore=10", SentinelJson.Options);
+        graph.Should().NotBeNull();
+        graph!.Nodes.Should().Contain(n => n.Type == GraphNodeType.Host && n.Data.ContainsKey("rank") && n.Data["rank"] == "0");
+        graph.Nodes.Should().Contain(n => n.Type == GraphNodeType.Process);
+
+        // Analyse IA / Playbook SOC sur l'alerte générée
+        var aiResp = await client.PostAsync(ApiRoutes.Fill(ApiRoutes.AlertAiAnalyze, demo.PrimaryAlertId!.Value), null);
+        aiResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var aiDto = await aiResp.Content.ReadFromJsonAsync<AiIncidentAnalysisDto>(SentinelJson.Options);
+        aiDto.Should().NotBeNull();
+        aiDto!.ImmediateActions.Should().NotBeEmpty();
+
+        // Scan Système Général + Audit de Posture Sécurité
+        var scanResp = await client.PostAsJsonAsync(ApiRoutes.SystemScan, new SystemScanRequest(IngestAnomalies: false, IncludeAiSummary: true), SentinelJson.Options);
+        scanResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var scanReport = await scanResp.Content.ReadFromJsonAsync<SystemScanReportDto>(SentinelJson.Options);
+        scanReport!.ProcessesInspected.Should().BeGreaterThan(5);
+
+        var auditResp = await client.PostAsync(ApiRoutes.SystemSecurityAudit, null);
+        auditResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var auditReport = await auditResp.Content.ReadFromJsonAsync<SecurityAuditReportDto>(SentinelJson.Options);
+        auditReport!.Checks.Should().HaveCountGreaterThanOrEqualTo(10);
+        auditReport.HashChainValid.Should().BeTrue();
+    }
+
     private static (AlertNotificationService Service, string TempDir) CreateService(
         RecordingSmtpTransport smtp,
         RecordingHttpHandler httpHandler)
